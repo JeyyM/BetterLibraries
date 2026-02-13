@@ -1,8 +1,7 @@
 
 import React from 'react';
 import { Book, QuizQuestion } from '../types';
-import { MOCK_BOOKS } from '../constants';
-import { generateQuizForBook, refineQuestion } from '../services/geminiService';
+import { supabase } from '../src/lib/supabase';
 import { 
   Plus, 
   Upload, 
@@ -36,6 +35,56 @@ const QuizStudio: React.FC<QuizStudioProps> = ({ onBack }) => {
   const [editingIndex, setEditingIndex] = React.useState<number | null>(null);
   const [chatInput, setChatInput] = React.useState('');
   const [isRefining, setIsRefining] = React.useState(false);
+  const [books, setBooks] = React.useState<Book[]>([]);
+  const [loadingBooks, setLoadingBooks] = React.useState(true);
+
+  // Fetch books from Supabase
+  React.useEffect(() => {
+    const fetchBooks = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('books')
+          .select('*')
+          .eq('is_active', true)
+          .order('title')
+          .limit(10); // Show first 10 books in quiz studio
+
+        if (error) throw error;
+
+        if (data) {
+          const transformedBooks: Book[] = data.map(book => ({
+            id: book.id,
+            title: book.title,
+            author: book.author,
+            coverImage: getCoverImageUrl(book.id),
+            description: book.description || '',
+            fullDescription: book.full_description || book.description || '',
+            level: book.lexile_level,
+            genre: book.genre || 'Fiction',
+            pages: book.page_count || 0,
+            estimatedTime: `${Math.ceil((book.page_count || 100) / 30)} min`,
+            content: book.description || '' // Use description as sample content
+          }));
+
+          setBooks(transformedBooks);
+        }
+      } catch (error) {
+        console.error('Error fetching books:', error);
+      } finally {
+        setLoadingBooks(false);
+      }
+    };
+
+    fetchBooks();
+  }, []);
+
+  const getCoverImageUrl = (bookId: string): string => {
+    const { data } = supabase.storage
+      .from('book-covers')
+      .getPublicUrl(`${bookId}.jpg`);
+    
+    return data.publicUrl || `https://placehold.co/300x400/6366f1/white?text=Book`;
+  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -58,15 +107,113 @@ const QuizStudio: React.FC<QuizStudioProps> = ({ onBack }) => {
   const startGeneration = async () => {
     if (!source) return;
     setIsGenerating(true);
-    try {
-      const generated = await generateQuizForBook({ title: source.title, content: source.content });
-      setQuestions(generated);
-      setStep('edit');
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setIsGenerating(false);
-    }
+    
+    // Simulate a brief loading for UX
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    
+    // Hardcoded demo quiz data
+    const demoQuestions: QuizQuestion[] = [
+      {
+        id: '1',
+        text: 'What is the main theme of this story?',
+        type: 'multiple-choice',
+        difficulty: 'medium',
+        category: 'analysis',
+        options: [
+          'Friendship and loyalty',
+          'The dangers of greed',
+          'The power of nature',
+          'Coming of age'
+        ],
+        correctAnswer: 1,
+        points: 10
+      },
+      {
+        id: '2',
+        text: 'Who is the protagonist of the story?',
+        type: 'multiple-choice',
+        difficulty: 'easy',
+        category: 'recall',
+        options: [
+          'The narrator',
+          'The old man',
+          'The young boy',
+          'The mysterious stranger'
+        ],
+        correctAnswer: 0,
+        points: 5
+      },
+      {
+        id: '3',
+        text: 'Describe the setting of the story in your own words.',
+        type: 'short-answer',
+        difficulty: 'easy',
+        category: 'recall',
+        options: [],
+        points: 10
+      },
+      {
+        id: '4',
+        text: 'What literary device does the author use most effectively?',
+        type: 'multiple-choice',
+        difficulty: 'hard',
+        category: 'analysis',
+        options: [
+          'Metaphor',
+          'Foreshadowing',
+          'Personification',
+          'Irony'
+        ],
+        correctAnswer: 3,
+        points: 15
+      },
+      {
+        id: '5',
+        text: 'How does the protagonist change throughout the story? Provide specific examples.',
+        type: 'essay',
+        difficulty: 'hard',
+        category: 'analysis',
+        options: [],
+        points: 20
+      },
+      {
+        id: '6',
+        text: 'What is the climax of the story?',
+        type: 'short-answer',
+        difficulty: 'medium',
+        category: 'inference',
+        options: [],
+        points: 10
+      },
+      {
+        id: '7',
+        text: 'Which quote best represents the central conflict?',
+        type: 'multiple-choice',
+        difficulty: 'medium',
+        category: 'inference',
+        options: [
+          '"It was the best of times, it was the worst of times"',
+          '"All that glitters is not gold"',
+          '"The road to hell is paved with good intentions"',
+          '"Be careful what you wish for"'
+        ],
+        correctAnswer: 3,
+        points: 10
+      },
+      {
+        id: '8',
+        text: 'Analyze how the author uses symbolism to develop the theme. Use evidence from the text.',
+        type: 'essay',
+        difficulty: 'hard',
+        category: 'analysis',
+        options: [],
+        points: 25
+      }
+    ];
+    
+    setQuestions(demoQuestions);
+    setStep('edit');
+    setIsGenerating(false);
   };
 
   const updateQuestion = (index: number, updates: Partial<QuizQuestion>) => {
@@ -88,15 +235,54 @@ const QuizStudio: React.FC<QuizStudioProps> = ({ onBack }) => {
   const handleRefine = async () => {
     if (editingIndex === null || !chatInput.trim() || !source) return;
     setIsRefining(true);
-    try {
-      const refined = await refineQuestion(questions[editingIndex], chatInput, source.content);
-      updateQuestion(editingIndex, refined);
-      setChatInput('');
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setIsRefining(false);
+    
+    // Simulate AI processing
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Demo: Apply some simple transformations based on input keywords
+    const currentQ = questions[editingIndex];
+    let refined: Partial<QuizQuestion> = {};
+    
+    const input = chatInput.toLowerCase();
+    
+    if (input.includes('easier') || input.includes('easy')) {
+      refined.difficulty = 'easy';
+      refined.points = (currentQ.points || 10) - 5;
+    } else if (input.includes('harder') || input.includes('difficult')) {
+      refined.difficulty = 'hard';
+      refined.points = (currentQ.points || 10) + 5;
     }
+    
+    if (input.includes('analysis')) {
+      refined.category = 'analysis';
+    } else if (input.includes('recall')) {
+      refined.category = 'recall';
+    } else if (input.includes('inference')) {
+      refined.category = 'inference';
+    }
+    
+    if (input.includes('multiple choice') || input.includes('mcq')) {
+      refined.type = 'multiple-choice';
+      refined.options = ['Option A', 'Option B', 'Option C', 'Option D'];
+      refined.correctAnswer = 0;
+    } else if (input.includes('short answer')) {
+      refined.type = 'short-answer';
+      refined.options = [];
+      refined.correctAnswer = undefined;
+    } else if (input.includes('essay')) {
+      refined.type = 'essay';
+      refined.options = [];
+      refined.correctAnswer = undefined;
+    }
+    
+    // If no specific changes detected, just add a subtle modification
+    if (Object.keys(refined).length === 0) {
+      refined.text = currentQ.text + ' (refined)';
+    }
+    
+    updateQuestion(editingIndex, refined);
+    setChatInput('');
+    setIsRefining(false);
   };
 
   if (step === 'select') {
@@ -124,22 +310,29 @@ const QuizStudio: React.FC<QuizStudioProps> = ({ onBack }) => {
               <FileText className="text-indigo-600" />
               Choose from Library
             </h3>
-            <div className="space-y-3">
-              {MOCK_BOOKS.map(book => (
-                <button 
-                  key={book.id}
-                  onClick={() => handleSelectBook(book)}
-                  className="w-full flex items-center gap-4 p-4 rounded-2xl hover:bg-slate-50 border border-transparent hover:border-slate-100 transition-all text-left"
-                >
-                  <img src={book.coverImage} className="w-12 h-16 rounded-lg object-cover" />
-                  <div className="flex-1">
-                    <p className="font-bold text-slate-900">{book.title}</p>
-                    <p className="text-xs text-slate-500 font-bold uppercase tracking-widest">{book.level}L Lexile</p>
-                  </div>
-                  <ChevronRight size={16} className="text-slate-400" />
-                </button>
-              ))}
-            </div>
+            {loadingBooks ? (
+              <div className="text-center py-8">
+                <div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
+                <p className="text-slate-400 text-sm mt-4">Loading books...</p>
+              </div>
+            ) : (
+              <div className="space-y-3 max-h-96 overflow-y-auto">
+                {books.map(book => (
+                  <button 
+                    key={book.id}
+                    onClick={() => handleSelectBook(book)}
+                    className="w-full flex items-center gap-4 p-4 rounded-2xl hover:bg-slate-50 border border-transparent hover:border-slate-100 transition-all text-left"
+                  >
+                    <img src={book.coverImage} className="w-12 h-16 rounded-lg object-cover" alt={book.title} />
+                    <div className="flex-1">
+                      <p className="font-bold text-slate-900">{book.title}</p>
+                      <p className="text-xs text-slate-500 font-bold uppercase tracking-widest">{book.level}L Lexile</p>
+                    </div>
+                    <ChevronRight size={16} className="text-slate-400" />
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>

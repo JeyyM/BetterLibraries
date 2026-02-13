@@ -63,7 +63,7 @@ export interface QuizQuestion {
   id: string;
   text: string;
   options: string[];
-  correctAnswer: number;
+  correctAnswer?: number; // Optional for short-answer and essay types
   type: 'multiple-choice' | 'short-answer' | 'essay';
   difficulty: 'easy' | 'medium' | 'hard';
   category: 'recall' | 'inference' | 'analysis';

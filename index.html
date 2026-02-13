@@ -12,6 +12,23 @@
             font-family: 'Plus Jakarta Sans', sans-serif;
             background-color: #f8fafc;
         }
+        
+        /* Hide PDF.js toolbar */
+        iframe {
+            position: relative;
+        }
+        
+        /* Target PDF.js toolbar via CSS injection */
+        .pdf-viewer-container iframe::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 32px;
+            background: white;
+            z-index: 9999;
+        }
     </style>
 <script type="importmap">
 {

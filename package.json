@@ -8,7 +8,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "setup": "node setup-accounts.js",
-    "import-books": "node import-books.js"
+    "import-books": "node import-books.js",
+    "import-single": "node import-single-book.js",
+    "upload-covers": "node upload-book-covers.js"
   },
   "dependencies": {
     "@google/genai": "^1.41.0",
@@ -16,8 +18,10 @@
     "dotenv": "^17.3.1",
     "lucide-react": "^0.563.0",
     "openai": "^6.21.0",
+    "pdfjs-dist": "^5.4.624",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "react-dom": "^19.2.4",
+    "react-pdf": "^10.3.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

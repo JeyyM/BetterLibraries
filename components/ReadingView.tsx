@@ -1,8 +1,8 @@
 
 import React from 'react';
 import { Book } from '../types';
-import { ChevronLeft, ChevronRight, Bookmark, Settings, ListChecks, HelpCircle, X, Sparkles } from 'lucide-react';
-import { getWordExplanation } from '../services/geminiService';
+import { ChevronLeft, Bookmark, ListChecks, FileText, Download, Loader2, ChevronRight } from 'lucide-react';
+import { supabase } from '../src/lib/supabase';
 
 interface ReadingViewProps {
   book: Book;
@@ -11,36 +11,78 @@ interface ReadingViewProps {
 }
 
 const ReadingView: React.FC<ReadingViewProps> = ({ book, onFinish, onBack }) => {
-  const [currentPage, setCurrentPage] = React.useState(1);
-  const [selectedWord, setSelectedWord] = React.useState<string | null>(null);
-  const [explanation, setExplanation] = React.useState<string | null>(null);
-  const [isExplaining, setIsExplaining] = React.useState(false);
-  const totalPages = Math.ceil(book.pages / 20);
+  const [pdfUrl, setPdfUrl] = React.useState<string | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [currentPage, setCurrentPage] = React.useState<number>(1);
+  const containerRef = React.useRef<HTMLDivElement>(null);
 
-  const handleTextSelection = () => {
-    const selection = window.getSelection();
-    const text = selection?.toString().trim();
-    if (text && text.split(/\s+/).length === 1) { // Only single words
-      setSelectedWord(text);
-      fetchExplanation(text);
-    }
-  };
+  React.useEffect(() => {
+    const loadPDF = async () => {
+      setLoading(true);
+      setError(null);
+      
+      try {
+        // Get the PDF URL from Supabase Storage (PDFs stored without .pdf extension)
+        const { data } = supabase.storage
+          .from('book-content')
+          .getPublicUrl(book.id);
 
-  const fetchExplanation = async (word: string) => {
-    setIsExplaining(true);
-    setExplanation(null);
-    try {
-      const result = await getWordExplanation(word, book.content, book.level);
-      setExplanation(result);
-    } catch (e) {
-      setExplanation("Oops! I couldn't explain that right now.");
-    } finally {
-      setIsExplaining(false);
+        if (data.publicUrl) {
+          console.log('📄 PDF URL:', data.publicUrl);
+          setPdfUrl(data.publicUrl);
+        } else {
+          setError('PDF not found for this book.');
+        }
+      } catch (err) {
+        console.error('Error loading PDF:', err);
+        setError('Failed to load PDF.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadPDF();
+  }, [book.id]);
+
+  // Use custom PDF viewer without toolbar (keep URL constant, only use hash for navigation)
+  const pdfViewerUrl = pdfUrl 
+    ? `/pdf-viewer.html?file=${encodeURIComponent(pdfUrl)}`
+    : null;
+
+  const totalPages = book.pages || 100;
+  const progressPercentage = (currentPage / totalPages) * 100;
+
+  // Debug: Log book pages
+  React.useEffect(() => {
+    console.log('📚 Book:', book.title, '- Pages:', book.pages, '- Total Pages Used:', totalPages);
+  }, [book.title, book.pages, totalPages]);
+  
+  // Update PDF page when currentPage changes
+  React.useEffect(() => {
+    if (containerRef.current && pdfUrl && currentPage > 0) {
+      const iframe = containerRef.current.querySelector('iframe') as HTMLIFrameElement;
+      if (iframe && iframe.contentWindow) {
+        setTimeout(() => {
+          try {
+            iframe.contentWindow.location.hash = `page=${currentPage}`;
+          } catch (e) {
+            console.log('Cannot update hash (cross-origin or not loaded yet)');
+          }
+        }, 100); // Small delay to ensure iframe is loaded
+      }
     }
+  }, [currentPage, pdfUrl]);
+
+  const navigateToPage = (page: number) => {
+    const boundedPage = Math.max(1, Math.min(totalPages, page));
+    console.log('Navigating to page:', boundedPage, '/', totalPages);
+    setCurrentPage(boundedPage);
+    // The useEffect above will handle updating the iframe hash
   };
 
   return (
-    <div className="fixed inset-0 bg-white z-50 flex flex-col animate-in slide-in-from-right duration-300">
+    <div className="fixed inset-0 bg-white z-50 flex flex-col">
       {/* Reader Nav */}
       <nav className="h-16 border-b border-slate-100 flex items-center justify-between px-4 sm:px-8 shrink-0">
         <div className="flex items-center gap-4">
@@ -70,81 +112,107 @@ const ReadingView: React.FC<ReadingViewProps> = ({ book, onFinish, onBack }) => 
         </div>
       </nav>
 
-      {/* Reader Content */}
-      <div className="flex-1 overflow-y-auto bg-slate-50 flex justify-center py-12 px-4 relative">
-        <div 
-          className="max-w-2xl w-full bg-white shadow-2xl shadow-slate-200/50 rounded-[2.5rem] p-8 sm:p-16 min-h-[800px] flex flex-col"
-          onMouseUp={handleTextSelection}
-        >
-          <div className="flex-1 text-slate-800 text-lg sm:text-xl leading-relaxed font-serif space-y-6 select-text">
-            <h2 className="text-2xl font-bold text-slate-900 font-sans mb-8">Chapter {currentPage}</h2>
-            <p>{book.content}</p>
-            <p>
-              The journey ahead was uncertain, but Maya felt a strange sense of <strong>clarity</strong>. She looked at Sparky, whose optical sensors flickered with a rhythmic pulse. It was as if the robot was dreaming, processing the vast amounts of data gathered from their afternoon at the park.
-            </p>
-            <p>
-              "Do you think they'll find us here?" she whispered. Sparky's head tilted. "The probability of detection is currently 4.2%," he synthesized. "We are safe for now."
-            </p>
+      {/* PDF Content */}
+      <div ref={containerRef} className="flex-1 overflow-hidden bg-slate-50 flex justify-center relative">
+        {loading && (
+          <div className="flex flex-col items-center justify-center h-full">
+            <Loader2 className="w-12 h-12 text-indigo-600 animate-spin mb-4" />
+            <p className="text-slate-600 font-medium">Loading PDF...</p>
           </div>
-          
-          <div className="mt-12 pt-8 border-t border-slate-100 flex items-center justify-between text-slate-400 text-xs font-bold uppercase tracking-widest">
-            <span>Page {currentPage} of {totalPages}</span>
-            <div className="flex gap-2">
-              <button 
-                disabled={currentPage === 1}
-                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                className="p-2 rounded-full hover:bg-slate-50 disabled:opacity-30"
-              >
-                <ChevronLeft size={20} />
-              </button>
-              <button 
-                disabled={currentPage === totalPages}
-                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                className="p-2 rounded-full hover:bg-slate-50 disabled:opacity-30"
-              >
-                <ChevronRight size={20} />
-              </button>
-            </div>
-          </div>
-        </div>
+        )}
 
-        {/* Word Explanation Popup */}
-        {selectedWord && (
-          <div className="fixed bottom-8 left-1/2 -translate-x-1/2 w-[90%] max-w-md bg-slate-900 text-white rounded-3xl p-6 shadow-2xl animate-in slide-in-from-bottom-4 border border-white/10 z-[60]">
-            <div className="flex justify-between items-start mb-4">
-              <div className="flex items-center gap-2">
-                <div className="bg-indigo-500 p-1.5 rounded-lg">
-                  <Sparkles size={16} />
-                </div>
-                <h4 className="font-bold text-indigo-300">"{selectedWord}"</h4>
-              </div>
-              <button onClick={() => setSelectedWord(null)} className="text-slate-400 hover:text-white">
-                <X size={18} />
-              </button>
-            </div>
+        {error && (
+          <div className="flex flex-col items-center justify-center h-full">
+            <FileText className="w-16 h-16 text-slate-300 mb-4" />
+            <p className="text-slate-600 font-bold text-lg mb-2">{error}</p>
+            <p className="text-slate-400 text-sm">The PDF file for this book is not available.</p>
+          </div>
+        )}
+
+        {!loading && !error && pdfViewerUrl && (
+          <div className="w-full h-full flex flex-col">
+            <iframe
+              key={pdfUrl}
+              src={pdfViewerUrl}
+              className="w-full flex-1 border-0"
+              title={book.title}
+              style={{ height: '100%' }}
+            />
             
-            {isExplaining ? (
-              <div className="flex items-center gap-3 text-slate-400 py-2">
-                <div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-                <p className="text-sm font-medium">Asking Gemini...</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <p className="text-sm leading-relaxed text-slate-200">{explanation}</p>
-                <button className="text-[10px] font-black uppercase tracking-widest text-indigo-400 hover:text-indigo-300 transition-colors">
-                  Add to Word Bank
+            {/* Page Navigation Overlay */}
+            <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-white/95 backdrop-blur-sm rounded-2xl px-6 py-3 shadow-xl border border-slate-200 z-10">
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={() => navigateToPage(currentPage - 1)}
+                  disabled={currentPage === 1}
+                  className="p-2 rounded-full hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  title="Previous page"
+                >
+                  <ChevronLeft size={20} className="text-slate-700" />
+                </button>
+                
+                <div className="flex items-center gap-3">
+                  <input
+                    type="number"
+                    value={currentPage}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === '') {
+                        setCurrentPage(1);
+                        return;
+                      }
+                      const page = parseInt(val);
+                      if (!isNaN(page) && page >= 1 && page <= totalPages) {
+                        setCurrentPage(page);
+                      }
+                    }}
+                    onBlur={(e) => {
+                      const val = e.target.value;
+                      if (val === '' || isNaN(parseInt(val))) {
+                        setCurrentPage(1);
+                        return;
+                      }
+                      const page = parseInt(val);
+                      const boundedPage = Math.max(1, Math.min(totalPages, page));
+                      setCurrentPage(boundedPage);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const val = e.currentTarget.value;
+                        if (val === '' || isNaN(parseInt(val))) {
+                          navigateToPage(1);
+                          return;
+                        }
+                        const page = parseInt(val);
+                        navigateToPage(page);
+                      }
+                    }}
+                    className="w-16 text-center px-2 py-1 border border-slate-200 rounded-lg text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    min={1}
+                    max={totalPages}
+                  />
+                  <span className="text-sm text-slate-400 font-medium">/ {totalPages}</span>
+                </div>
+
+                <button
+                  onClick={() => navigateToPage(currentPage + 1)}
+                  disabled={currentPage === totalPages}
+                  className="p-2 rounded-full hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  title="Next page"
+                >
+                  <ChevronRight size={20} className="text-slate-700" />
                 </button>
               </div>
-            )}
+            </div>
           </div>
         )}
       </div>
 
       {/* Progress Footer */}
-      <footer className="h-4 bg-slate-100 shrink-0">
+      <footer className="h-1.5 bg-slate-200 shrink-0">
         <div 
-          className="h-full bg-indigo-500 transition-all duration-500" 
-          style={{ width: `${(currentPage / totalPages) * 100}%` }}
+          className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 transition-all duration-500 shadow-lg shadow-indigo-200" 
+          style={{ width: `${progressPercentage}%` }}
         ></div>
       </footer>
     </div>

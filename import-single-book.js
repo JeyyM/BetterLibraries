@@ -26,16 +26,12 @@ const ai = new GoogleGenAI({ apiKey: process.env.VITE_GEMINI_API_KEY });
 const BOOKS_DIR = path.join(__dirname, 'books');
 
 /**
- * Extract basic info from PDF filename and file size
- * Since we can't easily parse PDF text in Node without complex dependencies,
- * we'll use the filename and let Gemini infer metadata
+ * Extract basic info from PDF
  */
 async function extractPDFInfo(pdfPath) {
   try {
     const stats = fs.statSync(pdfPath);
     const fileName = path.basename(pdfPath, '.pdf');
-    
-    // Estimate pages based on file size (rough estimate: 100KB per page)
     const estimatedPages = Math.max(1, Math.round(stats.size / 102400));
     
     return {
@@ -44,43 +40,13 @@ async function extractPDFInfo(pdfPath) {
       estimatedPages: estimatedPages
     };
   } catch (error) {
-    console.error(`Error extracting PDF info from ${pdfPath}:`, error.message);
+    console.error(`Error extracting PDF info:`, error.message);
     return null;
   }
 }
 
 /**
- * Retry function with exponential backoff
- */
-async function retryWithBackoff(fn, maxRetries = 3, initialDelay = 2000) {
-  let lastError;
-  
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      return await fn();
-    } catch (error) {
-      lastError = error;
-      
-      // Check if it's a 503 error (high demand)
-      if (error.message?.includes('503') || error.message?.includes('UNAVAILABLE')) {
-        if (i < maxRetries - 1) {
-          const delay = initialDelay * Math.pow(2, i);
-          console.log(`   ⏳ API busy, retrying in ${delay/1000}s... (attempt ${i + 2}/${maxRetries})`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          continue;
-        }
-      }
-      
-      // If it's not a 503 or we're out of retries, throw
-      throw error;
-    }
-  }
-  
-  throw lastError;
-}
-
-/**
- * Use Gemini to analyze book title and infer metadata
+ * Analyze book with Gemini
  */
 async function analyzeBookWithAI(title, pages) {
   try {
@@ -109,30 +75,30 @@ Guidelines:
 - Use your knowledge of classic literature to fill in accurate information
 - Identify clear themes that teachers can use for discussion`;
 
-    // Use Gemini with retry logic
-    const response = await retryWithBackoff(async () => {
-      return await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json"
-        }
-      });
-    }, 3, 2000);
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json"
+      }
+    });
 
     const metadata = JSON.parse(response.text);
     
     // Validate required fields and provide defaults if missing
     if (!metadata.author || metadata.author === 'undefined') {
-      console.log(`   ⚠️  Missing author, using fallback for "${title}"`);
-      metadata.author = 'Unknown';
+      console.log(`   ⚠️  Missing author, using "W. W. Jacobs"`);
+      metadata.author = 'W. W. Jacobs';
     }
     if (!metadata.lexile_level || metadata.lexile_level === 'undefined') {
-      console.log(`   ⚠️  Missing Lexile level, using default`);
-      metadata.lexile_level = 800; // Default middle school level
+      console.log(`   ⚠️  Missing Lexile level, using 950`);
+      metadata.lexile_level = 950;
     }
     if (!metadata.genre) {
-      metadata.genre = 'Fiction';
+      metadata.genre = 'Horror / Gothic Fiction';
+    }
+    if (!metadata.themes || metadata.themes.length === 0) {
+      metadata.themes = ['Fate', 'Consequences', 'Greed'];
     }
     
     return metadata;
@@ -145,7 +111,7 @@ Guidelines:
 /**
  * Upload PDF to Supabase Storage
  */
-async function uploadBookPDF(bookId, pdfPath, fileName) {
+async function uploadBookPDF(bookId, pdfPath) {
   try {
     const fileBuffer = fs.readFileSync(pdfPath);
     const storagePath = `${bookId}/full.pdf`;
@@ -193,10 +159,15 @@ async function insertBookRecord(bookData) {
 }
 
 /**
- * Process a single book
+ * Import THE MONKEY'S PAW
  */
-async function processBook(filePath, fileName) {
-  const title = fileName.replace('.pdf', '');
+async function importMonkeysPaw() {
+  console.log('📚 Importing THE MONKEY\'S PAW\n');
+  console.log('=' .repeat(60));
+  
+  const fileName = 'THE MONKEY\'S PAW.pdf';
+  const filePath = path.join(BOOKS_DIR, fileName);
+  const title = 'THE MONKEY\'S PAW';
   
   console.log(`\n📖 Processing: ${title}`);
   
@@ -206,7 +177,7 @@ async function processBook(filePath, fileName) {
   
   if (!pdfInfo) {
     console.log(`   ❌ Failed to analyze PDF`);
-    return { success: false, title };
+    return;
   }
   
   console.log(`   ✅ Estimated ${pdfInfo.estimatedPages} pages`);
@@ -217,7 +188,7 @@ async function processBook(filePath, fileName) {
   
   if (!metadata) {
     console.log(`   ❌ Failed to analyze with AI`);
-    return { success: false, title };
+    return;
   }
   
   console.log(`   ✅ Detected: ${metadata.author} | ${metadata.genre} | Lexile ${metadata.lexile_level}`);
@@ -225,11 +196,11 @@ async function processBook(filePath, fileName) {
   // Step 3: Generate book ID and upload PDF
   const bookId = randomUUID();
   console.log(`   ⏳ Uploading to Supabase Storage...`);
-  const storagePath = await uploadBookPDF(bookId, filePath, fileName);
+  const storagePath = await uploadBookPDF(bookId, filePath);
   
   if (!storagePath) {
     console.log(`   ❌ Failed to upload PDF`);
-    return { success: false, title };
+    return;
   }
   
   console.log(`   ✅ Uploaded to storage`);
@@ -245,11 +216,11 @@ async function processBook(filePath, fileName) {
     estimated_time_minutes: metadata.estimated_time_minutes,
     description: metadata.description,
     full_description: metadata.full_description,
-    content: `${title} by ${metadata.author}. ${metadata.description}`, // Summary for search
+    content: `${title} by ${metadata.author}. ${metadata.description}`,
     full_content_path: storagePath,
     publication_year: metadata.publication_year,
     is_active: true,
-    cover_image_path: null // Will be added later or use default
+    cover_image_path: null
   };
   
   // Step 5: Insert into database
@@ -258,12 +229,12 @@ async function processBook(filePath, fileName) {
   
   if (!insertedBook) {
     console.log(`   ❌ Failed to save to database`);
-    return { success: false, title };
+    return;
   }
   
   console.log(`   ✅ ${title} imported successfully!`);
   
-  // Add book tags if themes are provided
+  // Add book tags
   if (metadata.themes && metadata.themes.length > 0) {
     for (const theme of metadata.themes) {
       await supabase
@@ -273,80 +244,13 @@ async function processBook(filePath, fileName) {
     console.log(`   ✅ Added ${metadata.themes.length} tags`);
   }
   
-  return { 
-    success: true, 
-    title, 
-    metadata,
-    bookId 
-  };
-}
-
-/**
- * Main import function
- */
-async function importAllBooks() {
-  console.log('📚 BetterLibraries Book Import Tool\n');
-  console.log('=' .repeat(60));
-  
-  // Get all PDF files
-  const files = fs.readdirSync(BOOKS_DIR).filter(f => f.endsWith('.pdf'));
-  
-  console.log(`\n📁 Found ${files.length} PDF files in books folder\n`);
-  
-  const results = {
-    successful: [],
-    failed: []
-  };
-  
-  // Process each book
-  for (let i = 0; i < files.length; i++) {
-    const fileName = files[i];
-    const filePath = path.join(BOOKS_DIR, fileName);
-    
-    console.log(`\n[${i + 1}/${files.length}]`);
-    
-    const result = await processBook(filePath, fileName);
-    
-    if (result.success) {
-      results.successful.push(result);
-    } else {
-      results.failed.push(result);
-    }
-    
-    // Add delay between books to avoid rate limiting (2 seconds)
-    if (i < files.length - 1) {
-      await new Promise(resolve => setTimeout(resolve, 2000));
-    }
-  }
-  
-  // Print summary
   console.log('\n' + '='.repeat(60));
-  console.log('📊 IMPORT SUMMARY');
-  console.log('='.repeat(60));
-  console.log(`✅ Successfully imported: ${results.successful.length} books`);
-  console.log(`❌ Failed: ${results.failed.length} books`);
-  
-  if (results.successful.length > 0) {
-    console.log('\n✨ Successfully Imported Books:');
-    results.successful.forEach(book => {
-      console.log(`   • ${book.title} (${book.metadata?.author || 'Unknown'})`);
-    });
-  }
-  
-  if (results.failed.length > 0) {
-    console.log('\n❌ Failed Books:');
-    results.failed.forEach(book => {
-      console.log(`   • ${book.title}`);
-    });
-  }
-  
-  console.log('\n' + '='.repeat(60));
-  console.log('🎉 Import process complete!');
+  console.log('🎉 Import complete!');
   console.log('='.repeat(60));
 }
 
 // Run the import
-importAllBooks().catch(error => {
+importMonkeysPaw().catch(error => {
   console.error('Fatal error:', error);
   process.exit(1);
 });

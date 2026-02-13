@@ -17,7 +17,7 @@ import ReadingHistory from './components/ReadingHistory';
 import StudentAssignments from './components/StudentAssignments';
 import DiscussionBoard from './components/DiscussionBoard';
 import { TrendingUp, Users, Trophy, Activity, ClipboardList, History, Search, Medal, MessageSquare } from 'lucide-react';
-import { MOCK_BOOKS } from './constants';
+import { supabase } from './src/lib/supabase';
 
 const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = React.useState(false);
@@ -26,6 +26,54 @@ const App: React.FC = () => {
   const [selectedBook, setSelectedBook] = React.useState<Book | null>(null);
   const [viewState, setViewState] = React.useState<'normal' | 'reading' | 'quiz' | 'results' | 'discussion'>('normal');
   const [lastAttempt, setLastAttempt] = React.useState<QuizAttempt | null>(null);
+  const [books, setBooks] = React.useState<Book[]>([]);
+
+  // Fetch books from Supabase
+  React.useEffect(() => {
+    const fetchBooks = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('books')
+          .select('*')
+          .eq('is_active', true)
+          .order('title');
+
+        if (error) throw error;
+
+        if (data) {
+          const transformedBooks: Book[] = data.map(book => ({
+            id: book.id,
+            title: book.title,
+            author: book.author,
+            coverImage: getCoverImageUrl(book.id),
+            description: book.description || '',
+            fullDescription: book.full_description || book.description || '',
+            level: book.lexile_level,
+            genre: book.genre || 'Fiction',
+            pages: book.page_count || 0,
+            estimatedTime: `${Math.ceil((book.page_count || 100) / 30)} min`,
+            content: book.description || ''
+          }));
+
+          setBooks(transformedBooks);
+        }
+      } catch (error) {
+        console.error('Error fetching books:', error);
+      }
+    };
+
+    if (isAuthenticated) {
+      fetchBooks();
+    }
+  }, [isAuthenticated]);
+
+  const getCoverImageUrl = (bookId: string): string => {
+    const { data } = supabase.storage
+      .from('book-covers')
+      .getPublicUrl(`${bookId}.jpg`);
+    
+    return data.publicUrl || `https://placehold.co/300x400/6366f1/white?text=Book`;
+  };
 
   const handleLogin = (selectedRole: UserRole) => {
     setRole(selectedRole);
@@ -101,10 +149,10 @@ const App: React.FC = () => {
                  <p className="text-slate-600 font-medium mt-1">Moderate active book threads and grade participation.</p>
                </div>
                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                 {MOCK_BOOKS.map(book => (
+                 {books.map(book => (
                    <div key={book.id} className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm hover:shadow-xl transition-all group">
                      <div className="aspect-[3/4] rounded-[2rem] overflow-hidden mb-6 relative">
-                       <img src={book.coverImage} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                       <img src={book.coverImage} alt={book.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                          <button 
                            onClick={() => handleOpenDiscussion(book)}
@@ -149,14 +197,14 @@ const App: React.FC = () => {
              <h1 className="text-4xl font-black text-slate-900 tracking-tight">Discussion Hub</h1>
              <p className="text-slate-600 font-medium mt-1">Talk about your latest reads with your classmates.</p>
              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                {MOCK_BOOKS.map(book => (
+                {books.map(book => (
                   <button 
                     key={book.id} 
                     onClick={() => handleOpenDiscussion(book)}
                     className="bg-white p-6 rounded-[3rem] border border-slate-100 shadow-sm hover:shadow-xl transition-all group text-left"
                   >
                     <div className="aspect-[3/4] rounded-[2rem] overflow-hidden mb-6">
-                      <img src={book.coverImage} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                      <img src={book.coverImage} alt={book.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
                     </div>
                     <h3 className="font-black text-xl text-slate-900 group-hover:text-indigo-600 transition-colors">{book.title}</h3>
                     <div className="flex items-center gap-2 mt-2">

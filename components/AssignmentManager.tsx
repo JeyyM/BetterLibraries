@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Book, Assignment, Submission } from '../types';
-import { MOCK_BOOKS } from '../constants';
+import { supabase } from '../src/lib/supabase';
 import { evaluateAnswer } from '../services/geminiService';
 import { 
   ClipboardList, 
@@ -94,10 +94,59 @@ const AssignmentManager: React.FC = () => {
   const [gradingFeedback, setGradingFeedback] = React.useState<Record<string, { score: number, feedback: string }>>({});
   const [isEvaluating, setIsEvaluating] = React.useState<string | null>(null);
   const [remindedStudents, setRemindedStudents] = React.useState<Set<string>>(new Set());
+  const [books, setBooks] = React.useState<Book[]>([]);
+  const [loadingBooks, setLoadingBooks] = React.useState(true);
   
   // New Mission State
   const [enableDiscussion, setEnableDiscussion] = React.useState(false);
   const [discussionMaxScore, setDiscussionMaxScore] = React.useState(10);
+
+  // Fetch books from Supabase
+  React.useEffect(() => {
+    const fetchBooks = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('books')
+          .select('*')
+          .eq('is_active', true)
+          .order('title');
+
+        if (error) throw error;
+
+        if (data) {
+          const transformedBooks: Book[] = data.map(book => ({
+            id: book.id,
+            title: book.title,
+            author: book.author,
+            coverImage: getCoverImageUrl(book.id),
+            description: book.description || '',
+            fullDescription: book.full_description || book.description || '',
+            level: book.lexile_level,
+            genre: book.genre || 'Fiction',
+            pages: book.page_count || 0,
+            estimatedTime: `${Math.ceil((book.page_count || 100) / 30)} min`,
+            content: book.description || ''
+          }));
+
+          setBooks(transformedBooks);
+        }
+      } catch (error) {
+        console.error('Error fetching books:', error);
+      } finally {
+        setLoadingBooks(false);
+      }
+    };
+
+    fetchBooks();
+  }, []);
+
+  const getCoverImageUrl = (bookId: string): string => {
+    const { data } = supabase.storage
+      .from('book-covers')
+      .getPublicUrl(`${bookId}.jpg`);
+    
+    return data.publicUrl || `https://placehold.co/300x400/6366f1/white?text=Book`;
+  };
 
   const handleAutoGrade = async (qId: string, question: string, answer: string) => {
     setIsEvaluating(qId);
@@ -257,24 +306,31 @@ const AssignmentManager: React.FC = () => {
           </div>
         </div>
 
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {MOCK_BOOKS.map(book => (
-            <button 
-              key={book.id} 
-              onClick={() => { setSelectedBook(book); setStep('form'); }}
-              className="bg-white p-6 rounded-[3rem] border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group text-left"
-            >
-              <div className="aspect-[3/4] rounded-[2rem] overflow-hidden mb-6 relative">
-                <img src={book.coverImage} className="w-full h-full object-cover" />
-                <div className="absolute top-4 left-4 bg-white/95 backdrop-blur-sm px-3 py-1.5 rounded-xl text-[10px] font-black text-indigo-600 shadow-sm">
-                  {book.level}L
-                </div>
+        {loadingBooks ? (
+          <div className="text-center py-20">
+            <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
+            <p className="text-slate-400 mt-4">Loading books...</p>
+          </div>
+        ) : (
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            {books.map(book => (
+              <button 
+                key={book.id} 
+                onClick={() => { setSelectedBook(book); setStep('form'); }}
+                className="bg-white p-6 rounded-[3rem] border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group text-left"
+              >
+                <div className="aspect-[3/4] rounded-[2rem] overflow-hidden mb-6 relative">
+                  <img src={book.coverImage} alt={book.title} className="w-full h-full object-cover" />
+                  <div className="absolute top-4 left-4 bg-white/95 backdrop-blur-sm px-3 py-1.5 rounded-xl text-[10px] font-black text-indigo-600 shadow-sm">
+                    {book.level}L
+                  </div>
               </div>
               <h3 className="font-black text-xl text-slate-900 group-hover:text-indigo-600 transition-colors">{book.title}</h3>
               <p className="text-xs text-slate-500 font-bold uppercase mt-1 tracking-wider">{book.genre}</p>
             </button>
           ))}
         </div>
+        )}
       </div>
     );
   };
@@ -332,7 +388,7 @@ const AssignmentManager: React.FC = () => {
     }
 
     if (step === 'tracking-view' && selectedAssignment) {
-      const book = MOCK_BOOKS.find(b => b.id === selectedAssignment.bookId);
+      const book = books.find(b => b.id === selectedAssignment.bookId);
       const submissionCount = selectedAssignment.submissions?.length || 0;
       const totalCount = selectedAssignment.assignedStudentIds.length;
       const progress = (submissionCount / totalCount) * 100;
@@ -461,7 +517,7 @@ const AssignmentManager: React.FC = () => {
 
         <div className="grid gap-6">
           {MOCK_ASSIGNMENTS_DETAILED.map(asgn => {
-            const book = MOCK_BOOKS.find(b => b.id === asgn.bookId);
+            const book = books.find(b => b.id === asgn.bookId);
             const subCount = asgn.submissions?.length || 0;
             const totalCount = asgn.assignedStudentIds.length;
             const progress = (subCount / totalCount) * 100;

@@ -1,8 +1,8 @@
 
 import React from 'react';
-import { MOCK_BOOKS } from '../constants';
 import { Book } from '../types';
 import { Search, Filter, BookOpen, Clock, Tag } from 'lucide-react';
+import { supabase } from '../src/lib/supabase';
 
 interface LibraryProps {
   onReadBook: (book: Book) => void;
@@ -11,15 +11,96 @@ interface LibraryProps {
 const Library: React.FC<LibraryProps> = ({ onReadBook }) => {
   const [searchTerm, setSearchTerm] = React.useState('');
   const [selectedGenre, setSelectedGenre] = React.useState('All');
+  const [books, setBooks] = React.useState<Book[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [genres, setGenres] = React.useState<string[]>(['All']);
 
-  const genres = ['All', 'Science Fiction', 'Mystery', 'Educational', 'Adventure'];
+  // Fetch books from Supabase
+  React.useEffect(() => {
+    const fetchBooks = async () => {
+      setLoading(true);
+      try {
+        console.log('🔍 Fetching books from Supabase...');
+        const { data, error } = await supabase
+          .from('books')
+          .select('*')
+          .eq('is_active', true)
+          .order('title');
 
-  const filteredBooks = MOCK_BOOKS.filter(book => {
+        console.log('📊 Supabase response:', { data, error });
+
+        if (error) {
+          console.error('❌ Error fetching books:', error);
+          throw error;
+        }
+
+        if (data) {
+          console.log(`✅ Found ${data.length} books in database`);
+          
+          // Transform database books to match our Book type
+          const transformedBooks: Book[] = data.map(book => ({
+            id: book.id,
+            title: book.title,
+            author: book.author,
+            coverImage: getCoverImageUrl(book.id), // Get image from Supabase Storage
+            description: book.description || '',
+            fullDescription: book.full_description || book.description || '',
+            level: book.lexile_level,
+            genre: book.genre || 'Fiction',
+            pages: book.pages || 100,
+            estimatedTime: `${Math.ceil((book.pages || 100) / 30)} min`,
+            content: '' // We'll load this when needed
+          }));
+
+          console.log('📚 Transformed books:', transformedBooks);
+          setBooks(transformedBooks);
+
+          // Extract unique genres
+          const uniqueGenres = ['All', ...new Set(data.map(b => b.genre).filter(Boolean))];
+          console.log('🏷️ Genres:', uniqueGenres);
+          setGenres(uniqueGenres);
+        }
+      } catch (error) {
+        console.error('💥 Error fetching books:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchBooks();
+  }, []);
+
+  // Helper function to get book cover URL from Supabase Storage
+  const getCoverImageUrl = (bookId: string): string => {
+    const { data } = supabase.storage
+      .from('book-covers')
+      .getPublicUrl(`${bookId}.jpg`);
+    
+    // Fallback to placeholder if image doesn't exist
+    return data.publicUrl || `https://placehold.co/300x400/6366f1/white?text=${bookId}`;
+  };
+
+  const filteredBooks = books.filter(book => {
     const matchesSearch = book.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
                           book.author.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesGenre = selectedGenre === 'All' || book.genre === selectedGenre;
     return matchesSearch && matchesGenre;
   });
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-6">
+        <div className="relative">
+          <div className="absolute inset-0 bg-indigo-400/20 blur-3xl rounded-full animate-pulse"></div>
+          <BookOpen className="text-indigo-600 animate-bounce relative" size={64} />
+        </div>
+        <div className="text-center">
+          <h2 className="text-2xl font-bold text-slate-900">Loading Library...</h2>
+          <p className="text-slate-500 mt-2">Fetching your personalized book collection.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500">

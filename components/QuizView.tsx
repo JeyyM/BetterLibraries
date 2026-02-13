@@ -1,7 +1,6 @@
 
 import React from 'react';
 import { Book, QuizQuestion, QuizAttempt } from '../types';
-import { generateQuizForBook, getAIFeedback } from '../services/geminiService';
 import { Brain, ArrowRight, Loader2, CheckCircle2, XCircle, Sparkles } from 'lucide-react';
 
 interface QuizViewProps {
@@ -11,20 +10,90 @@ interface QuizViewProps {
 }
 
 const QuizView: React.FC<QuizViewProps> = ({ book, onComplete, onBack }) => {
-  const [questions, setQuestions] = React.useState<QuizQuestion[]>([]);
+  // Mock quiz questions for demo
+  const mockQuestions: QuizQuestion[] = [
+    {
+      id: '1',
+      text: `What is the main theme of "${book.title}"?`,
+      type: 'multiple-choice',
+      difficulty: 'medium',
+      category: 'analysis',
+      options: [
+        'Friendship and loyalty',
+        'Overcoming challenges',
+        'The power of imagination',
+        'Good versus evil'
+      ],
+      correctAnswer: 1,
+      points: 10
+    },
+    {
+      id: '2',
+      text: `Who is the main character in ${book.title}?`,
+      type: 'multiple-choice',
+      difficulty: 'easy',
+      category: 'recall',
+      options: [
+        'The protagonist',
+        'The narrator',
+        'A young hero',
+        'An unlikely champion'
+      ],
+      correctAnswer: 0,
+      points: 5
+    },
+    {
+      id: '3',
+      text: 'What setting does most of the story take place in?',
+      type: 'multiple-choice',
+      difficulty: 'easy',
+      category: 'recall',
+      options: [
+        'A bustling city',
+        'A quiet village',
+        'A magical forest',
+        'A mysterious castle'
+      ],
+      correctAnswer: 2,
+      points: 5
+    },
+    {
+      id: '4',
+      text: 'What is the central conflict in the story?',
+      type: 'multiple-choice',
+      difficulty: 'medium',
+      category: 'inference',
+      options: [
+        'Character vs. nature',
+        'Character vs. self',
+        'Character vs. society',
+        'Character vs. fate'
+      ],
+      correctAnswer: 1,
+      points: 10
+    },
+    {
+      id: '5',
+      text: 'Which literary device is used most prominently?',
+      type: 'multiple-choice',
+      difficulty: 'hard',
+      category: 'analysis',
+      options: [
+        'Metaphor',
+        'Foreshadowing',
+        'Symbolism',
+        'Irony'
+      ],
+      correctAnswer: 2,
+      points: 15
+    }
+  ];
+
+  const [questions, setQuestions] = React.useState<QuizQuestion[]>(mockQuestions);
   const [currentQuestionIndex, setCurrentQuestionIndex] = React.useState(0);
   const [answers, setAnswers] = React.useState<number[]>([]);
-  const [loading, setLoading] = React.useState(true);
+  const [loading, setLoading] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
-
-  React.useEffect(() => {
-    const loadQuiz = async () => {
-      const q = await generateQuizForBook(book);
-      setQuestions(q);
-      setLoading(false);
-    };
-    loadQuiz();
-  }, [book]);
 
   const handleSelect = (optionIndex: number) => {
     const newAnswers = [...answers];
@@ -48,7 +117,85 @@ const QuizView: React.FC<QuizViewProps> = ({ book, onComplete, onBack }) => {
     });
 
     const score = Math.round((correctCount / questions.length) * 100);
-    const feedback = await getAIFeedback(book, score, answers);
+    
+    // Mock AI feedback based on score
+    let feedback = {
+      summary: '',
+      strengths: [] as string[],
+      weaknesses: [] as string[],
+      suggestions: [] as string[]
+    };
+    
+    if (score >= 90) {
+      feedback = {
+        summary: `Excellent work! You scored ${score}% on ${book.title}. You demonstrate exceptional comprehension and analytical skills.`,
+        strengths: [
+          'Strong understanding of main themes',
+          'Excellent recall of story details',
+          'Good grasp of literary analysis concepts'
+        ],
+        weaknesses: [],
+        suggestions: [
+          'Continue challenging yourself with books at higher Lexile levels',
+          'Try writing your own analysis essays to deepen your skills'
+        ]
+      };
+    } else if (score >= 70) {
+      feedback = {
+        summary: `Good job! You scored ${score}% on ${book.title}. You show solid reading comprehension with room for growth.`,
+        strengths: [
+          'Good understanding of plot and characters',
+          'Solid recall of key events'
+        ],
+        weaknesses: [
+          'Could improve on deeper thematic analysis',
+          'Some difficulty with literary devices'
+        ],
+        suggestions: [
+          'Re-read sections about symbolism and themes',
+          'Practice identifying literary devices while reading',
+          'Discuss the book with classmates to gain new perspectives'
+        ]
+      };
+    } else if (score >= 50) {
+      feedback = {
+        summary: `You scored ${score}% on ${book.title}. You grasp the basics but need to work on deeper comprehension.`,
+        strengths: [
+          'Basic understanding of plot structure',
+          'Identified main characters correctly'
+        ],
+        weaknesses: [
+          'Difficulty with inference questions',
+          'Struggled with thematic analysis',
+          'Need to focus more on details while reading'
+        ],
+        suggestions: [
+          'Try reading the book again more slowly',
+          'Take notes while reading to track important details',
+          'Ask your teacher for additional support materials',
+          'Practice with books at a slightly lower Lexile level'
+        ]
+      };
+    } else {
+      feedback = {
+        summary: `You scored ${score}% on ${book.title}. This book may be challenging for your current level.`,
+        strengths: [
+          'You completed the quiz - great effort!'
+        ],
+        weaknesses: [
+          'This book may be above your current reading level',
+          'Need more practice with comprehension strategies',
+          'Difficulty with both recall and analysis questions'
+        ],
+        suggestions: [
+          'Try books at a lower Lexile level to build confidence',
+          'Read in shorter sessions and take notes',
+          'Ask for help from your teacher or reading specialist',
+          'Practice with guided reading exercises',
+          'Don\'t give up - every reader improves with practice!'
+        ]
+      };
+    }
 
     const attempt: QuizAttempt = {
       id: Math.random().toString(36).substr(2, 9),
