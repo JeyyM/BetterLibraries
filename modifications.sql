@@ -132,7 +132,7 @@ ON storage.objects FOR UPDATE
 TO public
 USING (bucket_id = 'book-covers')
 WITH CHECK (bucket_id = 'book-covers');
-
+--
 -- Allow public deletes (for cleanup)
 CREATE POLICY "Allow public deletes from book-content"
 ON storage.objects FOR DELETE
