@@ -913,10 +913,10 @@ const AssignmentManager: React.FC = () => {
   const getStudentStatus = (studentId: string, assignment: Assignment) => {
     const submission = assignment.submissions?.find(s => s.studentId === studentId);
     if (submission) {
-      // Check if graded (has total_score)
-      if (submission.totalScore !== undefined && submission.totalScore !== null) {
+      // Check grading status first
+      if (submission.gradingStatus === 'ai-graded' || submission.gradingStatus === 'teacher-graded') {
         const maxScore = assignment.questions?.reduce((sum, q) => sum + (q.points || 10), 0) || 100;
-        const percentage = Math.round((submission.totalScore / maxScore) * 100);
+        const percentage = Math.round(((submission.totalScore || 0) / maxScore) * 100);
         const gradingLabel = submission.gradingStatus === 'ai-graded' ? 'AI-Graded' : 'Teacher-Graded';
         return { 
           label: gradingLabel, 
@@ -1918,12 +1918,12 @@ const AssignmentManager: React.FC = () => {
                                  {remindedStudents.has(student.id) ? <CheckCircle2 size={18} /> : <Bell size={18} />}
                                </button>
                              )}
-                             {(status.label === 'Submitted' || status.label === 'Late' || status.label === 'Graded') && submission && (
+                             {(status.label === 'Submitted' || status.label === 'Late' || status.label === 'Graded' || status.label === 'AI-Graded' || status.label === 'Teacher-Graded') && submission && (
                                <button 
                                 onClick={() => loadSubmissionDetails(submission, selectedAssignment.id)}
                                 className="bg-slate-900 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-600 transition-all"
                                >
-                                 {status.label === 'Graded' ? 'View' : 'Review'}
+                                 {(status.label === 'Graded' || status.label === 'AI-Graded' || status.label === 'Teacher-Graded') ? 'View' : 'Review'}
                                </button>
                              )}
                           </div>

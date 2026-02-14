@@ -1,5 +1,6 @@
 
 import React from 'react';
+import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { UserRole } from '../types';
 import { 
   BookOpen, 
@@ -23,38 +24,38 @@ import {
 } from 'lucide-react';
 
 interface LayoutProps {
-  children: React.ReactNode;
   role: UserRole;
   onLogout: () => void;
-  activeSection: string;
-  setActiveSection: (section: string) => void;
 }
 
-const Layout: React.FC<LayoutProps> = ({ children, role, onLogout, activeSection, setActiveSection }) => {
+const Layout: React.FC<LayoutProps> = ({ role, onLogout }) => {
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
   const [isProfileOpen, setIsProfileOpen] = React.useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
 
   const studentNav = [
-    { name: 'My Dashboard', icon: LayoutDashboard, id: 'dashboard' },
-    { name: 'Achievements', icon: Medal, id: 'achievements' },
-    { name: 'Discussion Hub', icon: MessageSquare, id: 'discussions' },
-    { name: 'Book Library', icon: Library, id: 'library' },
-    { name: 'Assignments', icon: ClipboardList, id: 'assignments' },
-    { name: 'My Learning', icon: BarChart2, id: 'analytics' },
-    { name: 'Reading History', icon: History, id: 'history' },
+    { name: 'My Dashboard', icon: LayoutDashboard, path: '/dashboard' },
+    { name: 'Achievements', icon: Medal, path: '/achievements' },
+    { name: 'Discussion Hub', icon: MessageSquare, path: '/discussions' },
+    { name: 'Book Library', icon: Library, path: '/library' },
+    { name: 'Assignments', icon: ClipboardList, path: '/assignments' },
+    { name: 'My Learning', icon: BarChart2, path: '/analytics' },
+    { name: 'Reading History', icon: History, path: '/history' },
   ];
 
   const teacherNav = [
-    { name: 'Class Overview', icon: LayoutDashboard, id: 'dashboard' },
-    { name: 'Student Roster', icon: Users, id: 'roster' },
-    { name: 'Library Management', icon: Library, id: 'library-management' },
-    { name: 'Discussion Hub', icon: MessageSquare, id: 'discussions' },
-    { name: 'Assignment Lab', icon: ClipboardList, id: 'teacher-assignments' },
-    { name: 'Reward Studio', icon: Sparkles, id: 'activity' },
-    { name: 'Leaderboard', icon: Trophy, id: 'leaderboard' },
+    { name: 'Class Overview', icon: LayoutDashboard, path: '/dashboard' },
+    { name: 'Student Roster', icon: Users, path: '/roster' },
+    { name: 'Library Management', icon: Library, path: '/library/manage' },
+    { name: 'Discussion Hub', icon: MessageSquare, path: '/discussions' },
+    { name: 'Assignment Lab', icon: ClipboardList, path: '/assignments' },
+    { name: 'Reward Studio', icon: Sparkles, path: '/rewards' },
+    { name: 'Leaderboard', icon: Trophy, path: '/leaderboard' },
   ];
 
   const navItems = role === 'teacher' ? teacherNav : studentNav;
+  const isActive = (path: string) => location.pathname === path || location.pathname.startsWith(path + '/');
 
   return (
     <div className="min-h-screen bg-[#FDFDFF] flex flex-col selection:bg-indigo-100 selection:text-indigo-900">
@@ -137,19 +138,19 @@ const Layout: React.FC<LayoutProps> = ({ children, role, onLogout, activeSection
           <nav className="flex-1 p-6 space-y-2 mt-2">
             {navItems.map((item) => (
               <button
-                key={item.id}
+                key={item.path}
                 onClick={() => {
-                  setActiveSection(item.id);
+                  navigate(item.path);
                   setIsSidebarOpen(false);
                 }}
                 className={`
                   w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl text-sm font-bold transition-all group
-                  ${activeSection === item.id 
+                  ${isActive(item.path) 
                     ? (role === 'teacher' ? 'bg-emerald-600 text-white shadow-xl shadow-emerald-100' : 'bg-indigo-600 text-white shadow-xl shadow-indigo-100') + ' translate-x-1' 
                     : 'text-slate-500 hover:bg-slate-50 hover:text-indigo-600'}
                 `}
               >
-                <item.icon size={20} className={activeSection === item.id ? 'text-white' : 'group-hover:scale-110 transition-transform'} />
+                <item.icon size={20} className={isActive(item.path) ? 'text-white' : 'group-hover:scale-110 transition-transform'} />
                 {item.name}
               </button>
             ))}
@@ -181,7 +182,7 @@ const Layout: React.FC<LayoutProps> = ({ children, role, onLogout, activeSection
 
         <main className="flex-1 overflow-y-auto p-4 sm:p-8 lg:p-12">
           <div className="max-w-6xl mx-auto">
-            {children}
+            <Outlet />
           </div>
         </main>
       </div>
