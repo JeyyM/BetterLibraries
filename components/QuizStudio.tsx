@@ -2,7 +2,7 @@
 import React from 'react';
 import { Book, QuizQuestion } from '../types';
 import { supabase } from '../src/lib/supabase';
-import { generateQuizForBook, extractBookMetadata } from '../services/geminiService';
+import { generateQuizForBook, extractBookMetadata, refineQuestion } from '../services/geminiService';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { 
@@ -329,53 +329,40 @@ const QuizStudio: React.FC<QuizStudioProps> = ({ onBack, book }) => {
     if (editingIndex === null || !chatInput.trim() || !source) return;
     setIsRefining(true);
     
-    // Simulate AI processing
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // Demo: Apply some simple transformations based on input keywords
-    const currentQ = questions[editingIndex];
-    let refined: Partial<QuizQuestion> = {};
-    
-    const input = chatInput.toLowerCase();
-    
-    if (input.includes('easier') || input.includes('easy')) {
-      refined.difficulty = 'easy';
-      refined.points = (currentQ.points || 10) - 5;
-    } else if (input.includes('harder') || input.includes('difficult')) {
-      refined.difficulty = 'hard';
-      refined.points = (currentQ.points || 10) + 5;
+    try {
+      const currentQ = questions[editingIndex];
+      
+      // Get book content for context (if available from source)
+      let bookContext = '';
+      if (source?.content) {
+        bookContext = source.content;
+      } else if (source?.bookId) {
+        // Try to fetch book content from database
+        const { data: book } = await supabase
+          .from('books')
+          .select('content')
+          .eq('id', source.bookId)
+          .single();
+        
+        if (book?.content) {
+          bookContext = book.content;
+        }
+      }
+      
+      console.log('🔄 Refining question with instruction:', chatInput);
+      
+      // Call Gemini API to refine the question
+      const refined = await refineQuestion(currentQ, chatInput, bookContext);
+      
+      // Update the question with the refined version
+      updateQuestion(editingIndex, refined);
+      setChatInput('');
+    } catch (error) {
+      console.error('Failed to refine question:', error);
+      alert('Failed to refine question. Please try again.');
+    } finally {
+      setIsRefining(false);
     }
-    
-    if (input.includes('analysis')) {
-      refined.category = 'analysis';
-    } else if (input.includes('recall')) {
-      refined.category = 'recall';
-    } else if (input.includes('inference')) {
-      refined.category = 'inference';
-    }
-    
-    if (input.includes('multiple choice') || input.includes('mcq')) {
-      refined.type = 'multiple-choice';
-      refined.options = ['Option A', 'Option B', 'Option C', 'Option D'];
-      refined.correctAnswer = 0;
-    } else if (input.includes('short answer')) {
-      refined.type = 'short-answer';
-      refined.options = [];
-      refined.correctAnswer = undefined;
-    } else if (input.includes('essay')) {
-      refined.type = 'essay';
-      refined.options = [];
-      refined.correctAnswer = undefined;
-    }
-    
-    // If no specific changes detected, just add a subtle modification
-    if (Object.keys(refined).length === 0) {
-      refined.text = currentQ.text + ' (refined)';
-    }
-    
-    updateQuestion(editingIndex, refined);
-    setChatInput('');
-    setIsRefining(false);
   };
 
   const handlePublishQuiz = async () => {

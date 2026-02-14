@@ -83,7 +83,69 @@ export const evaluateAnswer = async (question: string, studentAnswer: string, co
 };
 
 export const refineQuestion = async (question: QuizQuestion, instruction: string, context: string): Promise<QuizQuestion> => {
-  return question;
+  try {
+    const prompt = `You are refining a quiz question based on the teacher's instruction.
+
+CURRENT QUESTION:
+Text: "${question.text}"
+Type: ${question.type}
+Difficulty: ${question.difficulty}
+Category: ${question.category}
+Points: ${question.points}
+${question.type === 'multiple-choice' ? `Options: ${JSON.stringify(question.options)}
+Correct Answer Index: ${question.correctAnswer}` : ''}
+
+BOOK CONTEXT:
+${context.substring(0, 3000)}
+
+TEACHER'S INSTRUCTION:
+"${instruction}"
+
+Refine the question based on the instruction. You can:
+- Change the question text to be clearer, harder, easier, or more specific
+- Adjust difficulty level (easy/medium/hard)
+- Change category (recall/analysis/inference)
+- Modify points value
+- Change question type (multiple-choice/short-answer/essay/miro)
+- For multiple-choice: improve options or change correct answer
+- Make the question more engaging and educational
+
+Return ONLY a valid JSON object (no markdown, no extra text):
+{
+  "text": "refined question text",
+  "type": "${question.type}",
+  "difficulty": "easy",
+  "category": "recall",
+  "points": 10,
+  "options": ["A", "B", "C", "D"],
+  "correctAnswer": 0
+}
+
+For short-answer, essay, or miro types, use empty options array and omit correctAnswer.`;
+
+    console.log('🤖 Refining question with Gemini...');
+    const text = await callGemini(prompt);
+    console.log('✅ Refinement response received:', text);
+
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      console.error('No JSON found in refinement response:', text);
+      return question;
+    }
+
+    const refined = JSON.parse(jsonMatch[0]);
+    console.log('✨ Question refined:', refined);
+
+    // Preserve the ID and merge with refined data
+    return {
+      ...question,
+      ...refined,
+      id: question.id // Keep original ID
+    };
+  } catch (e) {
+    console.error('Failed to refine question:', e);
+    return question; // Return original on error
+  }
 };
 
 export const getAIFeedback = async (book: Book, score: number, answers: any[]): Promise<QuizAttempt['aiFeedback']> => {
