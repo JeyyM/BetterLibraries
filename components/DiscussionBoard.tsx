@@ -80,7 +80,7 @@ const DiscussionBoard: React.FC<DiscussionBoardProps> = ({ book, role, onBack, m
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
         <div className="flex items-center gap-4">
           <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
@@ -95,7 +95,7 @@ const DiscussionBoard: React.FC<DiscussionBoardProps> = ({ book, role, onBack, m
         </div>
       </div>
 
-      <div className="grid lg:grid-cols-12 gap-10">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
         <div className="lg:col-span-8 space-y-8">
           {/* Post Creator */}
           <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-xl shadow-slate-200/50">

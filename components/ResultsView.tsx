@@ -1,8 +1,9 @@
 
 import React from 'react';
 import { Book, QuizAttempt, Assignment } from '../types';
-import { PartyPopper, ArrowLeft, BarChart3, Star, Zap, Info, ThumbsUp, CheckCircle2, AlertCircle, Sparkles } from 'lucide-react';
+import { PartyPopper, ArrowLeft, BarChart3, Star, Zap, Info, ThumbsUp, CheckCircle2, AlertCircle, Sparkles, ExternalLink } from 'lucide-react';
 import { supabase } from '../src/lib/supabase';
+import { openBoardInNewTab } from '../services/miroService';
 
 interface ResultsViewProps {
   book: Book;
@@ -16,6 +17,7 @@ interface GradedAnswer {
   teacher_score: number | null;
   teacher_feedback: string | null;
   points_earned: number | null;
+  miro_board_id: string | null;
 }
 
 const ResultsView: React.FC<ResultsViewProps> = ({ book, attempt, assignment, onClose }) => {
@@ -28,7 +30,7 @@ const ResultsView: React.FC<ResultsViewProps> = ({ book, attempt, assignment, on
       try {
         const { data, error } = await supabase
           .from('quiz_answers')
-          .select('id, teacher_score, teacher_feedback, points_earned')
+          .select('id, teacher_score, teacher_feedback, points_earned, miro_board_id')
           .eq('attempt_id', attempt.id)
           .order('created_at', { ascending: true });
 
@@ -298,7 +300,48 @@ const ResultsView: React.FC<ResultsViewProps> = ({ book, attempt, assignment, on
 
                   <div className="border-t border-slate-200 pt-4">
                     <p className="text-sm font-semibold text-slate-600 mb-2">Your Answer:</p>
-                    {isMultipleChoice ? (
+                    {question.type === 'miro' ? (
+                      // Miro Board Display
+                      gradedAnswer?.miro_board_id ? (
+                        <div className="space-y-3">
+                          <div className="bg-gradient-to-r from-purple-600 to-pink-600 p-6 rounded-2xl text-white">
+                            <div className="flex items-center justify-between mb-4">
+                              <div className="flex items-center gap-2">
+                                <Sparkles size={20} />
+                                <h3 className="font-black text-sm uppercase tracking-widest">Student's Miro Board</h3>
+                              </div>
+                              <button
+                                onClick={() => openBoardInNewTab(gradedAnswer.miro_board_id!)}
+                                className="flex items-center gap-2 bg-white/20 hover:bg-white/30 px-4 py-2 rounded-xl font-bold text-xs transition-all"
+                              >
+                                <ExternalLink size={16} />
+                                Open in New Tab
+                              </button>
+                            </div>
+                            <iframe
+                              src={`https://miro.com/app/live-embed/${gradedAnswer.miro_board_id}/?moveToWidget=auto`}
+                              className="w-full h-[500px] border-2 border-white/20 rounded-b-2xl bg-white"
+                              title="Student Miro Board"
+                              allow="clipboard-read; clipboard-write"
+                              sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
+                              allowFullScreen
+                            />
+                          </div>
+                          <p className="text-xs text-slate-500 italic">
+                            📋 Task: {question.miroTitle || 'Digital Task'}
+                          </p>
+                          {question.miroDescription && (
+                            <p className="text-xs text-slate-500">
+                              {question.miroDescription}
+                            </p>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="bg-amber-50 p-4 rounded-xl border-2 border-amber-200">
+                          <p className="text-amber-900 font-medium">⚠️ Student has not created a Miro board yet</p>
+                        </div>
+                      )
+                    ) : isMultipleChoice ? (
                       <div className="bg-white p-4 rounded-xl border-2 border-slate-200">
                         <p className="text-slate-900 font-medium">
                           {typeof studentAnswer === 'number' && studentAnswer >= 0

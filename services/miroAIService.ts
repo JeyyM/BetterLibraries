@@ -1,0 +1,332 @@
+﻿// Miro AI Integration Service
+// Uses Gemini to create mind map specifications, then builds them on Miro
+
+import { GoogleGenAI } from '@google/genai';
+
+const genAI = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+
+interface BookSummary {
+  title: string;
+  content?: string;
+  fullText?: string;
+}
+
+interface MindMapNode {
+  id: string;
+  text: string;
+  color: string;
+  children: MindMapNode[];
+}
+
+interface MindMapSpec {
+  centralNode: {
+    text: string;
+    color: string;
+  };
+  branches: {
+    id: string;
+    text: string;
+    color: string;
+    subnodes: {
+      id: string;
+      text: string;
+      connections?: string[]; // IDs of other nodes to connect to
+    }[];
+  }[];
+}
+
+/**
+ * Generate mind map specification using Gemini AI
+ * Gemini creates the structure, relationships, and organization
+ */
+export const generateMindMapSpec = async (book: BookSummary): Promise<MindMapSpec> => {
+  const prompt = `
+You are creating a mind map specification for the book "${book.title}".
+
+Create a detailed mind map structure with:
+- A central node (the book title)
+- 4-6 main branches (themes, characters, plot, symbols, setting, quotes)
+- 2-4 subnodes under each branch
+- Relationships between nodes where relevant
+
+Return ONLY valid JSON in this exact format:
+{
+  "centralNode": {
+    "text": "Book Title",
+    "color": "#FF6B6B"
+  },
+  "branches": [
+    {
+      "id": "themes",
+      "text": "Main Themes",
+      "color": "#4ECDC4",
+      "subnodes": [
+        {
+          "id": "theme1",
+          "text": "First theme description",
+          "connections": ["char1"]
+        }
+      ]
+    }
+  ]
+}
+
+Use these colors:
+- Themes: #4ECDC4 (teal)
+- Characters: #95E1D3 (mint)
+- Plot: #FFD93D (yellow)
+- Symbols: #C780FA (purple)
+- Setting: #6BCF7F (green)
+- Quotes: #FF9AA2 (pink)
+
+Make connections between related nodes (e.g., a theme connects to a character who embodies it).
+Return ONLY the JSON, no other text.
+`;
+
+  const result = await genAI.models.generateContent({
+    model: "gemini-2.5-flash-lite",
+    contents: prompt
+  });
+  
+  const responseText = result.text || "";
+  
+  // Extract JSON from response (handle markdown code blocks)
+  let jsonText = responseText.trim();
+  if (jsonText.startsWith('```json')) {
+    jsonText = jsonText.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+  } else if (jsonText.startsWith('```')) {
+    jsonText = jsonText.replace(/```\n?/g, '');
+  }
+  
+  try {
+    const spec = JSON.parse(jsonText);
+    console.log('âœ… Gemini generated mind map spec:', spec);
+    return spec;
+  } catch (error) {
+    console.error('âŒ Failed to parse Gemini response:', responseText);
+    // Return a fallback structure
+    return {
+      centralNode: {
+        text: book.title,
+        color: "#FF6B6B"
+      },
+      branches: [
+        {
+          id: "themes",
+          text: "Main Themes",
+          color: "#4ECDC4",
+          subnodes: [
+            { id: "theme1", text: "Analyze book to discover themes" }
+          ]
+        }
+      ]
+    };
+  }
+};
+
+/**
+ * Create a mind map node on Miro board
+ */
+const createMindMapNode = async (
+  boardId: string,
+  text: string,
+  x: number,
+  y: number,
+  color: string,
+  width: number = 200,
+  height: number = 100,
+  shape: 'round_rectangle' | 'rectangle' | 'circle' = 'round_rectangle'
+): Promise<string> => {
+  const accessToken = import.meta.env.VITE_MIRO_ACCESS_TOKEN;
+
+  if (!accessToken) {
+    throw new Error('Miro access token not configured');
+  }
+
+  const response = await fetch(`https://api.miro.com/v2/boards/${boardId}/shapes`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      data: {
+        content: text,
+        shape: shape
+      },
+      style: {
+        fillColor: color,
+        fontSize: shape === 'round_rectangle' ? '24' : '14',
+        fontFamily: 'arial',
+        textAlign: 'center'
+      },
+      position: { x, y },
+      geometry: { width, height }
+    })
+  });
+
+  const data = await response.json();
+  return data.id; // Return the created item's ID for connecting
+};
+
+/**
+ * Create a connector between two nodes on Miro board
+ */
+const createConnector = async (
+  boardId: string,
+  startItemId: string,
+  endItemId: string
+): Promise<void> => {
+  const accessToken = import.meta.env.VITE_MIRO_ACCESS_TOKEN;
+
+  if (!accessToken) {
+    throw new Error('Miro access token not configured');
+  }
+
+  await fetch(`https://api.miro.com/v2/boards/${boardId}/connectors`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      startItem: { id: startItemId },
+      endItem: { id: endItemId },
+      style: {
+        strokeColor: '#1a1a1a',
+        strokeWidth: '2'
+      }
+    })
+  });
+};
+
+/**
+ * Build the mind map on Miro board from Gemini's specification
+ */
+export const buildMindMapOnMiro = async (
+  boardId: string,
+  spec: MindMapSpec
+): Promise<void> => {
+  console.log('ðŸŽ¨ Building mind map on Miro board...');
+  
+  // Track created items by ID for connecting
+  const itemIds: Record<string, string> = {};
+
+  // Create central node
+  const centralId = await createMindMapNode(
+    boardId,
+    spec.centralNode.text,
+    0,
+    0,
+    spec.centralNode.color,
+    300,
+    150,
+    'round_rectangle'
+  );
+  itemIds['central'] = centralId;
+  console.log('âœ… Created central node');
+
+  // Create branches in a radial layout
+  const branchCount = spec.branches.length;
+  const angleStep = (2 * Math.PI) / branchCount;
+  const branchRadius = 500;
+
+  for (let i = 0; i < branchCount; i++) {
+    const branch = spec.branches[i];
+    const angle = i * angleStep - Math.PI / 2; // Start from top
+    const branchX = branchRadius * Math.cos(angle);
+    const branchY = branchRadius * Math.sin(angle);
+
+    // Create branch node
+    const branchId = await createMindMapNode(
+      boardId,
+      branch.text,
+      branchX,
+      branchY,
+      branch.color,
+      220,
+      100,
+      'rectangle'
+    );
+    itemIds[branch.id] = branchId;
+
+    // Connect branch to central node
+    await createConnector(boardId, centralId, branchId);
+
+    // Create subnodes for this branch
+    const subnodeCount = branch.subnodes.length;
+    const subnodeAngleStart = angle - (subnodeCount - 1) * 0.3 / 2;
+    const subnodeRadius = 350;
+
+    for (let j = 0; j < subnodeCount; j++) {
+      const subnode = branch.subnodes[j];
+      const subnodeAngle = subnodeAngleStart + j * 0.3;
+      const subnodeX = branchX + subnodeRadius * Math.cos(subnodeAngle);
+      const subnodeY = branchY + subnodeRadius * Math.sin(subnodeAngle);
+
+      const subnodeId = await createMindMapNode(
+        boardId,
+        subnode.text,
+        subnodeX,
+        subnodeY,
+        branch.color,
+        180,
+        80,
+        'rectangle'
+      );
+      itemIds[subnode.id] = subnodeId;
+
+      // Connect subnode to branch
+      await createConnector(boardId, branchId, subnodeId);
+
+      // Create cross-connections if specified
+      if (subnode.connections) {
+        for (const targetId of subnode.connections) {
+          if (itemIds[targetId]) {
+            await createConnector(boardId, subnodeId, itemIds[targetId]);
+          }
+        }
+      }
+    }
+  }
+
+  console.log('âœ… Mind map built successfully on Miro!');
+};
+
+/**
+ * Generate and populate a complete reading board with AI content
+ * Uses Gemini to design the mind map, then builds it on Miro
+ */
+export const populateReadingBoardWithAI = async (
+  boardId: string,
+  book: BookSummary,
+  currentPage?: number
+): Promise<void> => {
+  console.log('🤖 Starting AI-powered mind map generation...');
+  console.log(`📚 Book: "UTF8{book.title}"`);
+
+  try {
+    // Step 1: Gemini analyzes book and creates mind map specification
+    console.log('🧠 Gemini is analyzing the book and designing the mind map...');
+    const mindMapSpec = await generateMindMapSpec(book);
+    
+    console.log(`✅ Gemini created mind map with UTF8{mindMapSpec.branches.length} main branches`);
+    mindMapSpec.branches.forEach(branch => {
+      console.log(`  • UTF8{branch.text} (UTF8{branch.subnodes.length} subnodes)`);
+    });
+
+    // Step 2: Build the mind map on Miro based on Gemini's design
+    console.log('🎨 Building visual mind map on Miro board...');
+    await buildMindMapOnMiro(boardId, mindMapSpec);
+
+    console.log('✅ AI-powered mind map completed successfully!');
+    console.log('📍 The mind map includes:');
+    console.log('   - Central node with book title');
+    console.log('   - Color-coded branches for different aspects');
+    console.log('   - Connected subnodes showing relationships');
+    console.log('   - Visual layout optimized for understanding');
+  } catch (error) {
+    console.error('❌ Error creating AI mind map:', error);
+    throw error;
+  }
+};

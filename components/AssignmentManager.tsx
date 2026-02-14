@@ -31,7 +31,8 @@ import {
   Save,
   Loader2,
   Rocket,
-  X
+  X,
+  ExternalLink
 } from 'lucide-react';
 
 const MOCK_ASSIGNMENTS_DETAILED: Assignment[] = [
@@ -247,6 +248,7 @@ const AssignmentManager: React.FC = () => {
           type: question.type,
           selectedIndex: answer?.selected_option_index,
           answerText: answer?.answer_text,
+          miroBoardId: answer?.miro_board_id,
           correctIndex: question.correctAnswer
         });
         
@@ -258,6 +260,8 @@ const AssignmentManager: React.FC = () => {
             studentSelectedIndex = answer.selected_option_index;
             studentAnswer = question.options?.[answer.selected_option_index] || 'Invalid option';
           }
+        } else if (question.type === 'miro') {
+          studentAnswer = answer?.miro_board_id ? 'Miro board submitted' : 'No Miro board';
         } else {
           studentAnswer = answer?.answer_text || 'No answer';
         }
@@ -267,6 +271,7 @@ const AssignmentManager: React.FC = () => {
           questionId: String(index),
           studentAnswer: studentAnswer,
           studentSelectedIndex: studentSelectedIndex,
+          miroBoardId: answer?.miro_board_id || null,
           score: answer?.points_earned || answer?.teacher_score,
           feedback: answer?.teacher_feedback || ''
         };
@@ -698,8 +703,22 @@ const AssignmentManager: React.FC = () => {
     setIsGenerating(true);
     try {
       const generatedQuestions = await generateQuizForBook(selectedBook);
-      setQuestions(generatedQuestions);
-      console.log('✅ Generated questions:', generatedQuestions);
+      
+      // Add a Miro question as the last question
+      const miroQuestion: QuizQuestion = {
+        id: `q-miro-${Date.now()}`,
+        text: 'Complete the digital task on your Miro board',
+        options: [],
+        type: 'miro',
+        difficulty: 'medium',
+        category: 'analysis',
+        points: 20,
+        miroTitle: 'Analysis Task',
+        miroDescription: 'Use the Miro board to complete the assigned task. Your teacher will provide specific instructions.'
+      };
+      
+      setQuestions([...generatedQuestions, miroQuestion]);
+      console.log('✅ Generated questions with Miro task:', [...generatedQuestions, miroQuestion]);
     } catch (error) {
       console.error('Failed to generate questions:', error);
       alert('Failed to generate questions. Please try again.');
@@ -1044,6 +1063,7 @@ const AssignmentManager: React.FC = () => {
                                 <option value="multiple-choice">Multiple Choice</option>
                                 <option value="short-answer">Short Answer</option>
                                 <option value="essay">Essay</option>
+                                <option value="miro">Miro Board (Digital Task)</option>
                               </select>
                             </div>
                             <div className="space-y-2">
@@ -1056,6 +1076,44 @@ const AssignmentManager: React.FC = () => {
                               />
                             </div>
                           </div>
+
+                          {q.type === 'miro' && (
+                            <div className="space-y-4 p-6 bg-purple-50 rounded-2xl border-2 border-purple-200">
+                              <div className="flex items-center gap-2 text-purple-700">
+                                <Sparkles size={18} />
+                                <span className="text-sm font-black uppercase tracking-widest">Miro Board Task</span>
+                              </div>
+                              <div className="space-y-3">
+                                <div>
+                                  <label className="text-[10px] font-black uppercase text-purple-700 ml-4 tracking-widest">Board Title</label>
+                                  <input 
+                                    value={q.miroTitle || ''}
+                                    onChange={(e) => updateQuestion(index, { miroTitle: e.target.value })}
+                                    className="w-full bg-white border-2 border-purple-200 rounded-xl py-3 px-4 text-sm font-bold text-slate-900 focus:border-purple-400 focus:ring-4 focus:ring-purple-100"
+                                    placeholder="e.g., Compare and Contrast"
+                                  />
+                                  <p className="text-[10px] text-purple-600 ml-4 mt-1 font-bold">
+                                    Board will be named: "{selectedBook?.title}: {q.miroTitle || '[Title]'}, [Student Name]"
+                                  </p>
+                                </div>
+                                <div>
+                                  <label className="text-[10px] font-black uppercase text-purple-700 ml-4 tracking-widest">Task Description</label>
+                                  <textarea 
+                                    value={q.miroDescription || ''}
+                                    onChange={(e) => updateQuestion(index, { miroDescription: e.target.value })}
+                                    className="w-full bg-white border-2 border-purple-200 rounded-xl py-3 px-4 text-sm font-bold text-slate-900 focus:border-purple-400 focus:ring-4 focus:ring-purple-100 min-h-[100px]"
+                                    placeholder="e.g., Create a table to contrast the main characters..."
+                                  />
+                                </div>
+                                <div className="bg-purple-100 p-4 rounded-xl">
+                                  <p className="text-[10px] font-black uppercase text-purple-700 tracking-widest mb-2">Note</p>
+                                  <p className="text-xs text-purple-900 font-bold">
+                                    Students will get a blank Miro board to complete this task. Teacher will manually review and grade their work.
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          )}
 
                           {q.type === 'multiple-choice' && (
                             <div className="space-y-3">
@@ -1092,13 +1150,25 @@ const AssignmentManager: React.FC = () => {
                                 <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase ${
                                   q.type === 'multiple-choice' ? 'bg-blue-50 text-blue-600' :
                                   q.type === 'short-answer' ? 'bg-amber-50 text-amber-600' :
-                                  'bg-purple-50 text-purple-600'
+                                  q.type === 'miro' ? 'bg-purple-50 text-purple-600' :
+                                  'bg-emerald-50 text-emerald-600'
                                 }`}>
-                                  {q.type === 'multiple-choice' ? 'MCQ' : q.type === 'short-answer' ? 'Short Answer' : 'Essay'}
+                                  {q.type === 'multiple-choice' ? 'MCQ' : 
+                                   q.type === 'short-answer' ? 'Short Answer' : 
+                                   q.type === 'miro' ? 'Miro Task' :
+                                   'Essay'}
                                 </span>
                                 <span className="ml-auto text-indigo-600 font-black">{q.points || 10} pts</span>
                               </div>
                               <p className="font-bold text-slate-900">{q.text}</p>
+                              {q.type === 'miro' && (
+                                <div className="mt-3 p-4 bg-purple-50 rounded-xl border border-purple-200">
+                                  <p className="text-xs font-black text-purple-700 mb-1">Board: {q.miroTitle || 'Untitled Task'}</p>
+                                  {q.miroDescription && (
+                                    <p className="text-xs text-purple-600 font-medium">{q.miroDescription}</p>
+                                  )}
+                                </div>
+                              )}
                               {q.type === 'multiple-choice' && (
                                 <div className="mt-3 space-y-2">
                                   {q.options?.map((opt, optIndex) => (
@@ -1638,7 +1708,49 @@ const AssignmentManager: React.FC = () => {
                      </div>
                    )}
 
-                   {question.type !== 'multiple-choice' && (
+                   {question.type === 'miro' ? (
+                     // Miro Board Display
+                     answer?.miroBoardId ? (
+                       <div className="space-y-3">
+                         <div className="bg-gradient-to-r from-purple-600 to-pink-600 p-6 rounded-2xl text-white">
+                           <div className="flex items-center justify-between mb-4">
+                             <div className="flex items-center gap-2">
+                               <Sparkles size={20} />
+                               <h3 className="font-black text-sm uppercase tracking-widest">Student's Miro Board</h3>
+                             </div>
+                             <button
+                               onClick={() => window.open(`https://miro.com/app/board/${answer.miroBoardId}/`, '_blank')}
+                               className="flex items-center gap-2 bg-white/20 hover:bg-white/30 px-4 py-2 rounded-xl font-bold text-xs transition-all"
+                             >
+                               <ExternalLink size={16} />
+                               Open in New Tab
+                             </button>
+                           </div>
+                           <iframe
+                             src={`https://miro.com/app/live-embed/${answer.miroBoardId}/?moveToWidget=auto`}
+                             className="w-full h-[500px] border-2 border-white/20 rounded-b-2xl bg-white"
+                             title="Student Miro Board"
+                             allow="clipboard-read; clipboard-write"
+                             sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
+                             allowFullScreen
+                           />
+                         </div>
+                         <p className="text-xs text-slate-500 italic">
+                           📋 Task: {question.miroTitle || 'Digital Task'}
+                         </p>
+                         {question.miroDescription && (
+                           <p className="text-xs text-slate-500">
+                             {question.miroDescription}
+                           </p>
+                         )}
+                       </div>
+                     ) : (
+                       <div className="bg-amber-50 p-6 rounded-2xl border-2 border-amber-200">
+                         <p className="text-xs font-black text-amber-600 uppercase tracking-widest mb-2">Student's Answer:</p>
+                         <p className="text-amber-900 font-medium">⚠️ Student has not created a Miro board yet</p>
+                       </div>
+                     )
+                   ) : question.type !== 'multiple-choice' && (
                      <div className="bg-indigo-50 p-6 rounded-2xl">
                        <p className="text-xs font-black text-indigo-600 uppercase tracking-widest mb-3">Student's Answer:</p>
                        <p className="text-slate-900 font-medium whitespace-pre-wrap">{answer?.studentAnswer || 'No answer provided'}</p>

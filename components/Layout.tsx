@@ -25,10 +25,11 @@ import {
 
 interface LayoutProps {
   role: UserRole;
+  userName?: string;
   onLogout: () => void;
 }
 
-const Layout: React.FC<LayoutProps> = ({ role, onLogout }) => {
+const Layout: React.FC<LayoutProps> = ({ role, userName, onLogout }) => {
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
   const [isProfileOpen, setIsProfileOpen] = React.useState(false);
   const navigate = useNavigate();
@@ -90,7 +91,7 @@ const Layout: React.FC<LayoutProps> = ({ role, onLogout }) => {
                 >
                   <div className="hidden sm:block text-right">
                     <p className="text-sm font-bold text-slate-900 leading-none group-hover:text-indigo-600 transition-colors">
-                      {role === 'teacher' ? 'Ms. Thompson' : 'Alex Johnson'}
+                      {userName || (role === 'teacher' ? 'Teacher' : 'Student')}
                     </p>
                     <div className="flex items-center justify-end gap-1 mt-1">
                        <p className={`text-[9px] px-1.5 py-0.5 rounded-md font-black tracking-widest uppercase ${role === 'teacher' ? 'bg-emerald-50 text-emerald-600' : 'bg-indigo-50 text-indigo-600'}`}>
@@ -100,7 +101,7 @@ const Layout: React.FC<LayoutProps> = ({ role, onLogout }) => {
                     </div>
                   </div>
                   <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-white font-black shadow-lg ring-4 ring-slate-50 ${role === 'teacher' ? 'bg-emerald-600' : 'bg-indigo-600'}`}>
-                    {role === 'teacher' ? 'T' : 'A'}
+                    {userName ? userName.charAt(0).toUpperCase() : (role === 'teacher' ? 'T' : 'S')}
                   </div>
                 </div>
 

@@ -87,7 +87,7 @@ const ReadingPage: React.FC<{ books: Book[]; userEmail: string }> = ({ books, us
         const q = assignmentId ? '?assignment=' + assignmentId : '';
         navigate('/books/' + book.id + '/quiz' + q);
       }}
-      onBack={() => navigate(-1)}
+      onBack={() => navigate('/dashboard')}
     />
   );
 };
@@ -297,13 +297,40 @@ const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = React.useState(false);
   const [role, setRole] = React.useState<UserRole>('student');
   const [userEmail, setUserEmail] = React.useState('');
+  const [userName, setUserName] = React.useState('');
   const [books, setBooks] = React.useState<Book[]>([]);
 
   const refreshBooks = async () => {
     try { setBooks(await fetchAndTransformBooks()); } catch (e) { console.error('Error fetching books:', e); }
   };
 
+  const fetchUserName = async (email: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('name')
+        .eq('email', email)
+        .single();
+      
+      if (error) {
+        console.error('Error fetching user name:', error);
+        setUserName(email.split('@')[0]); // Fallback to email username
+      } else {
+        setUserName(data?.name || email.split('@')[0]);
+      }
+    } catch (e) {
+      console.error('Error:', e);
+      setUserName(email.split('@')[0]); // Fallback to email username
+    }
+  };
+
   React.useEffect(() => { if (isAuthenticated) refreshBooks(); }, [isAuthenticated]);
+
+  React.useEffect(() => { 
+    if (isAuthenticated && userEmail) {
+      fetchUserName(userEmail);
+    }
+  }, [isAuthenticated, userEmail]);
 
   if (!isAuthenticated) {
     return (
@@ -320,10 +347,9 @@ const App: React.FC = () => {
       <Route path="/books/:bookId/read" element={<ReadingPage books={books} userEmail={userEmail} />} />
       <Route path="/books/:bookId/quiz" element={<QuizPage books={books} userEmail={userEmail} />} />
       <Route path="/books/:bookId/results/:attemptId" element={<ResultsPage books={books} />} />
-      <Route path="/books/:bookId/discussion" element={<DiscussionPage books={books} role={role} />} />
 
       {/* Layout-wrapped pages */}
-      <Route element={<Layout role={role} onLogout={() => setIsAuthenticated(false)} />}>
+      <Route element={<Layout role={role} userName={userName} onLogout={() => setIsAuthenticated(false)} />}>
         {role === 'teacher' ? (
           <>
             <Route path="/dashboard" element={<TeacherDashboard userEmail={userEmail} />} />
@@ -334,6 +360,7 @@ const App: React.FC = () => {
             <Route path="/assignments" element={<AssignmentManager />} />
             <Route path="/rewards" element={<BadgeManager />} />
             <Route path="/discussions" element={<DiscussionHubPage books={books} role={role} />} />
+            <Route path="/books/:bookId/discussion" element={<DiscussionPage books={books} role={role} />} />
             <Route path="/leaderboard" element={<LeaderboardPage />} />
           </>
         ) : (
@@ -345,6 +372,7 @@ const App: React.FC = () => {
             <Route path="/analytics" element={<AnalyticsPage />} />
             <Route path="/history" element={<ReadingHistory />} />
             <Route path="/discussions" element={<DiscussionHubPage books={books} role={role} />} />
+            <Route path="/books/:bookId/discussion" element={<DiscussionPage books={books} role={role} />} />
           </>
         )}
       </Route>

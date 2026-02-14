@@ -63,11 +63,13 @@ export interface QuizQuestion {
   id: string;
   text: string;
   options: string[];
-  correctAnswer?: number; // Optional for short-answer and essay types
-  type: 'multiple-choice' | 'short-answer' | 'essay';
+  correctAnswer?: number; // Optional for short-answer, essay, and miro types
+  type: 'multiple-choice' | 'short-answer' | 'essay' | 'miro';
   difficulty: 'easy' | 'medium' | 'hard';
   category: 'recall' | 'inference' | 'analysis';
   points?: number; // Point value for this specific question
+  miroTitle?: string; // Title for Miro board (e.g., "Compare and Contrast")
+  miroDescription?: string; // Instructions for the Miro task
 }
 
 export interface Quiz {
@@ -108,13 +110,14 @@ export interface Submission {
     score?: number; 
     feedback?: string;
     id?: string;
+    miro_board_id?: string; // For Miro question type
   }[];
   totalScore?: number;
   score?: number;
   isReviewed: boolean;
   isLate?: boolean;
   teacherComments?: string;
-  gradingStatus?: 'ai-graded' | 'teacher-graded' | 'not-graded';
+  gradingStatus?: 'ai-graded' | 'teacher-graded' | 'not-graded' | 'manual-review'; // Miro needs manual review
 }
 
 export interface QuizAttempt {

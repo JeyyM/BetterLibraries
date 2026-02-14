@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Miro Token Test</title>
+</head>
+<body>
+    <h1>Miro API Token Tester</h1>
+    <p>This will test if your Miro token can create boards</p>
+    
+    <button onclick="testToken()">Test Token</button>
+    <div id="result"></div>
+
+    <script>
+        async function testToken() {
+            const token = 'eyJtaXJvLm9yaWdpbiI6ImV1MDEifQ_unfNAR6tng_kGjRJATMQgOqpwak';
+            const resultDiv = document.getElementById('result');
+            
+            resultDiv.innerHTML = '<p>Testing token...</p>';
+            
+            try {
+                // First, try to get current user info
+                console.log('Getting user info...');
+                const userResponse = await fetch('https://api.miro.com/v2/me', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                const userData = await userResponse.json();
+                console.log('User data:', userData);
+                
+                resultDiv.innerHTML += `<p>✅ User: ${JSON.stringify(userData, null, 2)}</p>`;
+                
+                // Try to create a board
+                console.log('Creating test board...');
+                const boardResponse = await fetch('https://api.miro.com/v2/boards', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        name: 'Test Board from API',
+                        description: 'Testing board creation'
+                    })
+                });
+                
+                const boardData = await boardResponse.json();
+                console.log('Board response:', boardData);
+                
+                if (boardResponse.ok) {
+                    resultDiv.innerHTML += `<p style="color: green;">✅ SUCCESS! Board created: ${JSON.stringify(boardData, null, 2)}</p>`;
+                } else {
+                    resultDiv.innerHTML += `<p style="color: red;">❌ FAILED: ${JSON.stringify(boardData, null, 2)}</p>`;
+                }
+                
+            } catch (error) {
+                console.error('Error:', error);
+                resultDiv.innerHTML += `<p style="color: red;">❌ Error: ${error.message}</p>`;
+            }
+        }
+    </script>
+</body>
+</html>

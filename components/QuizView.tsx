@@ -1,10 +1,11 @@
 
 import React from 'react';
 import { Book, QuizQuestion, QuizAttempt, Assignment } from '../types';
-import { Brain, ArrowRight, Loader2, CheckCircle2, XCircle, Sparkles } from 'lucide-react';
+import { Brain, ArrowRight, Loader2, CheckCircle2, XCircle, Sparkles, ExternalLink } from 'lucide-react';
 import { supabase } from '../src/lib/supabase';
 import { batchGradeAnswers } from '../services/geminiService';
 import { calculateLexileAdjustment } from '../services/lexileService';
+import { createReadingBoard, openBoardInNewTab } from '../services/miroService';
 
 interface QuizViewProps {
   book: Book;
@@ -19,10 +20,14 @@ const QuizView: React.FC<QuizViewProps> = ({ book, assignment, userEmail, onComp
   const [currentQuestionIndex, setCurrentQuestionIndex] = React.useState(0);
   const [answers, setAnswers] = React.useState<number[]>([]); // For multiple choice
   const [textAnswers, setTextAnswers] = React.useState<string[]>([]); // For short-answer and essay
+  const [miroBoardIds, setMiroBoardIds] = React.useState<Record<number, string>>({}); // For Miro question boards
+  const [miroEmbedUrls, setMiroEmbedUrls] = React.useState<Record<number, string>>({}); // For Miro embed URLs
+  const [loadingMiro, setLoadingMiro] = React.useState<Record<number, boolean>>({});
   const [loading, setLoading] = React.useState(true);
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string>('');
   const [quizAutoGradingEnabled, setQuizAutoGradingEnabled] = React.useState(false); // For book quizzes
+  const [userName, setUserName] = React.useState<string>('Student');
 
   // Fetch quiz from database on mount or use assignment questions
   React.useEffect(() => {
@@ -78,6 +83,54 @@ const QuizView: React.FC<QuizViewProps> = ({ book, assignment, userEmail, onComp
 
     fetchQuiz();
   }, [book.id, assignment]);
+
+  // Fetch user name
+  React.useEffect(() => {
+    const fetchUserName = async () => {
+      try {
+        const { data } = await supabase
+          .from('users')
+          .select('name')
+          .eq('email', userEmail)
+          .single();
+        
+        if (data?.name) {
+          setUserName(data.name);
+        }
+      } catch (err) {
+        console.error('Failed to fetch user name:', err);
+      }
+    };
+
+    fetchUserName();
+  }, [userEmail]);
+
+  // Create Miro board for a question
+  const createMiroBoardForQuestion = async (questionIndex: number) => {
+    const question = questions[questionIndex];
+    if (question.type !== 'miro') return;
+
+    setLoadingMiro(prev => ({ ...prev, [questionIndex]: true }));
+    
+    try {
+      // Board name: "<Book Title>: <Question Title>, <Student Name>"
+      const boardTitle = `${book.title}: ${question.miroTitle || 'Task'}, ${userName}`;
+      
+      console.log('📋 Creating Miro board:', boardTitle);
+      // Pass the custom board title as the 4th parameter
+      const board = await createReadingBoard(book.id, book.title, userEmail, boardTitle);
+      
+      setMiroBoardIds(prev => ({ ...prev, [questionIndex]: board.id }));
+      setMiroEmbedUrls(prev => ({ ...prev, [questionIndex]: board.embedUrl }));
+      console.log('✅ Miro board created:', board.id);
+      console.log('📺 Embed URL:', board.embedUrl);
+    } catch (error) {
+      console.error('❌ Failed to create Miro board:', error);
+      alert('Failed to create Miro board. Please try again.');
+    } finally {
+      setLoadingMiro(prev => ({ ...prev, [questionIndex]: false }));
+    }
+  };
 
   const handleSelect = (optionIndex: number) => {
     const newAnswers = [...answers];
@@ -294,11 +347,13 @@ const QuizView: React.FC<QuizViewProps> = ({ book, assignment, userEmail, onComp
       const answerInserts = questions.map((q, idx) => {
         const selectedIndex = answers[idx];
         const answerText = textAnswers[idx];
+        const miroBoardId = miroBoardIds[idx];
         
         console.log(`Saving answer ${idx + 1}:`, {
           type: q.type,
           selectedIndex: selectedIndex,
           answerText: answerText,
+          miroBoardId: miroBoardId,
           isCorrect: q.type === 'multiple-choice' ? selectedIndex === q.correctAnswer : null
         });
         
@@ -306,7 +361,8 @@ const QuizView: React.FC<QuizViewProps> = ({ book, assignment, userEmail, onComp
           attempt_id: attemptData.id,
           question_id: null, // No question_id for assignment questions stored inline
           selected_option_index: q.type === 'multiple-choice' && selectedIndex >= 0 ? selectedIndex : null,
-          answer_text: q.type !== 'multiple-choice' ? answerText : null,
+          answer_text: q.type !== 'multiple-choice' && q.type !== 'miro' ? answerText : null,
+          miro_board_id: q.type === 'miro' ? miroBoardId : null,
           is_correct: q.type === 'multiple-choice' ? selectedIndex === q.correctAnswer : null,
           points_earned: q.type === 'multiple-choice' && selectedIndex === q.correctAnswer ? (q.points || 0) : null,
         };
@@ -378,7 +434,7 @@ const QuizView: React.FC<QuizViewProps> = ({ book, assignment, userEmail, onComp
               } else {
                 console.log('📝 Inserted answers:', insertedAnswers);
                 
-                // Collect essay/short-answer questions for grading
+                // Collect essay/short-answer questions for grading (exclude Miro)
                 const questionsToGrade = questions
                   .map((q, idx) => ({
                     index: idx,
@@ -388,6 +444,7 @@ const QuizView: React.FC<QuizViewProps> = ({ book, assignment, userEmail, onComp
                   }))
                   .filter(item => 
                     item.question.type !== 'multiple-choice' && 
+                    item.question.type !== 'miro' && 
                     item.answerText && 
                     item.answerText.trim() !== ''
                   );
@@ -717,6 +774,69 @@ const QuizView: React.FC<QuizViewProps> = ({ book, assignment, userEmail, onComp
                 className="w-full px-5 py-4 rounded-2xl border-2 border-slate-200 focus:border-indigo-500 focus:outline-none text-slate-900 placeholder:text-slate-400 font-medium transition-all"
               />
             </div>
+          ) : currentQuestion.type === 'miro' ? (
+            <div className="space-y-4">
+              {/* Miro Task Description */}
+              {currentQuestion.miroDescription && (
+                <div className="bg-purple-50 border-2 border-purple-200 p-6 rounded-2xl">
+                  <h3 className="text-sm font-black uppercase text-purple-700 tracking-widest mb-2">Task Instructions</h3>
+                  <p className="text-slate-700 font-medium whitespace-pre-wrap">{currentQuestion.miroDescription}</p>
+                </div>
+              )}
+
+              {/* Miro Board */}
+              {miroBoardIds[currentQuestionIndex] ? (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between bg-gradient-to-r from-purple-600 to-pink-600 text-white p-4 rounded-t-2xl">
+                    <div className="flex items-center gap-2">
+                      <Sparkles size={20} />
+                      <h3 className="font-black text-sm uppercase tracking-widest">Your Miro Board</h3>
+                    </div>
+                    <button
+                      onClick={() => openBoardInNewTab(miroBoardIds[currentQuestionIndex])}
+                      className="flex items-center gap-2 bg-white/20 hover:bg-white/30 px-4 py-2 rounded-xl font-bold text-xs transition-all"
+                    >
+                      <ExternalLink size={16} />
+                      Open in New Tab
+                    </button>
+                  </div>
+                  <iframe
+                    src={miroEmbedUrls[currentQuestionIndex]}
+                    className="w-full h-[500px] border-2 border-purple-200 rounded-b-2xl"
+                    title="Miro Whiteboard"
+                    allow="clipboard-read; clipboard-write"
+                    sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
+                    allowFullScreen
+                  />
+                  <p className="text-xs text-slate-500 text-center font-medium">
+                    Complete your work on the Miro board above. It will be automatically saved.
+                  </p>
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <button
+                    onClick={() => createMiroBoardForQuestion(currentQuestionIndex)}
+                    disabled={loadingMiro[currentQuestionIndex]}
+                    className="bg-gradient-to-r from-purple-600 to-pink-600 text-white px-8 py-4 rounded-2xl font-black text-sm uppercase tracking-widest shadow-xl hover:scale-105 transition-all disabled:opacity-50 flex items-center gap-3 mx-auto"
+                  >
+                    {loadingMiro[currentQuestionIndex] ? (
+                      <>
+                        <Loader2 size={20} className="animate-spin" />
+                        Creating Board...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={20} />
+                        Open Miro Board
+                      </>
+                    )}
+                  </button>
+                  <p className="text-xs text-slate-500 mt-4 font-medium">
+                    Click to create your personal Miro board for this task
+                  </p>
+                </div>
+              )}
+            </div>
           ) : (
             <div className="space-y-3">
               <label className="block text-sm font-semibold text-slate-700">Your Essay:</label>
@@ -745,7 +865,8 @@ const QuizView: React.FC<QuizViewProps> = ({ book, assignment, userEmail, onComp
             disabled={
               submitting || 
               (currentQuestion.type === 'multiple-choice' && answers[currentQuestionIndex] === undefined) ||
-              (currentQuestion.type !== 'multiple-choice' && !textAnswers[currentQuestionIndex]?.trim())
+              (currentQuestion.type === 'miro' && !miroBoardIds[currentQuestionIndex]) ||
+              (currentQuestion.type !== 'multiple-choice' && currentQuestion.type !== 'miro' && !textAnswers[currentQuestionIndex]?.trim())
             }
             onClick={handleNext}
             className={`
