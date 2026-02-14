@@ -26,7 +26,12 @@ import {
   Target,
   Image,
   BookOpen,
-  Loader2
+  Loader2,
+  ToggleLeft,
+  ToggleRight,
+  Users,
+  User,
+  Edit
 } from 'lucide-react';
 
 interface QuizStudioProps {
@@ -39,7 +44,7 @@ const QuizStudio: React.FC<QuizStudioProps> = ({ onBack, book }) => {
   React.useEffect(() => {
     pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
   }, []);
-  const [step, setStep] = React.useState<'select' | 'view-quizzes' | 'generate' | 'edit' | 'create-book'>(
+  const [step, setStep] = React.useState<'select' | 'view-quizzes' | 'generate' | 'edit' | 'create-book' | 'view-submissions'>(
     book ? 'view-quizzes' : 'select'
   );
   const [source, setSource] = React.useState<{ title: string, content: string, bookId?: string } | null>(
@@ -55,6 +60,12 @@ const QuizStudio: React.FC<QuizStudioProps> = ({ onBack, book }) => {
   const [existingQuizzes, setExistingQuizzes] = React.useState<any[]>([]);
   const [loadingQuizzes, setLoadingQuizzes] = React.useState(false);
   const [selectedQuiz, setSelectedQuiz] = React.useState<any | null>(null);
+  const [enableAutoAIGrading, setEnableAutoAIGrading] = React.useState(false);
+  
+  // Submission tracking states
+  const [quizSubmissions, setQuizSubmissions] = React.useState<any[]>([]);
+  const [loadingSubmissions, setLoadingSubmissions] = React.useState(false);
+  const [selectedSubmission, setSelectedSubmission] = React.useState<any | null>(null);
 
   // Book creation states
   const [uploadedFile, setUploadedFile] = React.useState<File | null>(null);
@@ -395,6 +406,7 @@ const QuizStudio: React.FC<QuizStudioProps> = ({ onBack, book }) => {
         .insert({
           book_id: source.bookId,
           questions: questions,
+          enable_auto_ai_grading: enableAutoAIGrading,
           status: 'published',
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
@@ -414,6 +426,82 @@ const QuizStudio: React.FC<QuizStudioProps> = ({ onBack, book }) => {
     } catch (error) {
       console.error('❌ Unexpected error:', error);
       alert('Failed to publish quiz. Please try again.');
+    }
+  };
+
+  // Fetch quiz submissions for a specific quiz
+  const fetchQuizSubmissions = async (quizId: string, bookId: string) => {
+    setLoadingSubmissions(true);
+    try {
+      // Get quiz details
+      const { data: quizData } = await supabase
+        .from('quiz_items')
+        .select('*')
+        .eq('id', quizId)
+        .single();
+
+      if (!quizData) {
+        alert('Quiz not found');
+        return;
+      }
+
+      // Get all quiz attempts for this book
+      const { data: attempts, error } = await supabase
+        .from('quiz_attempts')
+        .select(`
+          *,
+          users:student_id(email, name)
+        `)
+        .eq('book_id', bookId)
+        .order('completed_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching submissions:', error);
+        alert('Failed to load submissions');
+        return;
+      }
+
+      console.log('📊 Quiz submissions:', attempts);
+
+      // Get quiz answers for each attempt
+      const submissionsWithAnswers = await Promise.all(
+        (attempts || []).map(async (attempt) => {
+          const { data: answers } = await supabase
+            .from('quiz_answers')
+            .select('*')
+            .eq('attempt_id', attempt.id)
+            .order('created_at', { ascending: true });
+
+          // Calculate actual score from answers
+          const actualScore = (answers || []).reduce((sum, ans) => sum + (ans.points_earned || 0), 0);
+          
+          // Fix incorrect score in database if needed
+          if (actualScore !== attempt.score) {
+            console.warn(`🔧 Fixing incorrect score for attempt ${attempt.id}: ${attempt.score} → ${actualScore}`);
+            await supabase
+              .from('quiz_attempts')
+              .update({ score: actualScore })
+              .eq('id', attempt.id);
+          }
+
+          return {
+            ...attempt,
+            score: actualScore, // Use corrected score
+            quiz_answers: answers || [],
+            student_email: attempt.users?.email || 'Unknown',
+            student_name: attempt.users?.name || attempt.users?.email || 'Unknown Student'
+          };
+        })
+      );
+
+      setQuizSubmissions(submissionsWithAnswers);
+      setSelectedQuiz(quizData);
+      setStep('view-submissions');
+    } catch (error) {
+      console.error('Error:', error);
+      alert('Failed to load submissions');
+    } finally {
+      setLoadingSubmissions(false);
     }
   };
 
@@ -888,19 +976,19 @@ const QuizStudio: React.FC<QuizStudioProps> = ({ onBack, book }) => {
               {existingQuizzes.map((quiz, index) => (
                 <div
                   key={quiz.id}
-                  className="bg-white p-6 rounded-3xl border-2 border-slate-100 hover:border-indigo-300 hover:shadow-lg transition-all cursor-pointer group"
-                  onClick={() => {
-                    // Load this quiz for editing
-                    const parsedQuestions = typeof quiz.questions === 'string' 
-                      ? JSON.parse(quiz.questions) 
-                      : quiz.questions;
-                    setQuestions(parsedQuestions);
-                    setSelectedQuiz(quiz);
-                    setStep('edit');
-                  }}
+                  className="bg-white p-6 rounded-3xl border-2 border-slate-100 hover:border-indigo-300 hover:shadow-lg transition-all"
                 >
                   <div className="flex items-center justify-between">
-                    <div className="flex-1">
+                    <div className="flex-1 cursor-pointer" onClick={() => {
+                      // Load this quiz for editing
+                      const parsedQuestions = typeof quiz.questions === 'string' 
+                        ? JSON.parse(quiz.questions) 
+                        : quiz.questions;
+                      setQuestions(parsedQuestions);
+                      setSelectedQuiz(quiz);
+                      setEnableAutoAIGrading(quiz.enable_auto_ai_grading || false);
+                      setStep('edit');
+                    }}>
                       <div className="flex items-center gap-3 mb-2">
                         <h3 className="text-xl font-black text-slate-900">
                           Quiz #{index + 1}
@@ -912,6 +1000,12 @@ const QuizStudio: React.FC<QuizStudioProps> = ({ onBack, book }) => {
                         >
                           {quiz.status || 'draft'}
                         </span>
+                        {quiz.enable_auto_ai_grading && (
+                          <span className="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-purple-100 text-purple-700 flex items-center gap-1">
+                            <Sparkles size={12} />
+                            AI Grading
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-4 text-sm text-slate-600">
                         <span className="flex items-center gap-1">
@@ -925,7 +1019,19 @@ const QuizStudio: React.FC<QuizStudioProps> = ({ onBack, book }) => {
                         )}
                       </div>
                     </div>
-                    <ChevronRight size={24} className="text-slate-400 group-hover:text-indigo-600 transition-colors" />
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          fetchQuizSubmissions(quiz.id, source!.bookId!);
+                        }}
+                        className="px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold text-sm hover:bg-indigo-700 transition-all flex items-center gap-2"
+                      >
+                        <Users size={16} />
+                        View Submissions
+                      </button>
+                      <ChevronRight size={24} className="text-slate-400 transition-colors" />
+                    </div>
                   </div>
                 </div>
               ))}
@@ -1001,6 +1107,304 @@ const QuizStudio: React.FC<QuizStudioProps> = ({ onBack, book }) => {
     );
   }
 
+  // View Submissions Step
+  if (step === 'view-submissions') {
+    return (
+      <div className="space-y-8 animate-in fade-in duration-500 pb-24">
+        <div className="flex items-center gap-4">
+          <button onClick={() => setStep('view-quizzes')} className="p-2 hover:bg-slate-100 rounded-full">
+            <ArrowLeft size={24} className="text-slate-600" />
+          </button>
+          <div>
+            <h1 className="text-3xl font-black text-slate-900 tracking-tight">Quiz Submissions</h1>
+            <p className="text-slate-500 font-medium uppercase text-[10px] tracking-widest mt-1">
+              Book: {source?.title} • {quizSubmissions.length} Submissions
+            </p>
+          </div>
+        </div>
+
+        {loadingSubmissions ? (
+          <div className="flex items-center justify-center py-20">
+            <Loader2 className="animate-spin text-indigo-600" size={48} />
+          </div>
+        ) : quizSubmissions.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 space-y-6">
+            <div className="bg-slate-50 p-10 rounded-full">
+              <Users className="text-slate-400" size={64} />
+            </div>
+            <div className="text-center">
+              <h2 className="text-2xl font-black text-slate-900">No Submissions Yet</h2>
+              <p className="text-slate-600 mt-2">Students haven't taken this quiz yet.</p>
+            </div>
+          </div>
+        ) : (
+          <div className="grid gap-4">
+            {quizSubmissions.map((submission) => {
+              const quizQuestions = typeof selectedQuiz.questions === 'string' 
+                ? JSON.parse(selectedQuiz.questions) 
+                : selectedQuiz.questions;
+              
+              const totalPoints = quizQuestions.reduce((sum: number, q: any) => sum + (q.points || 0), 0);
+              
+              // Calculate actual score from quiz_answers instead of trusting submission.score
+              const actualScore = submission.quiz_answers.reduce((sum: number, ans: any) => {
+                return sum + (ans.points_earned || 0);
+              }, 0);
+              
+              const percentage = totalPoints > 0 ? Math.round((actualScore / totalPoints) * 100) : 0;
+              
+              // Check if there are questions needing manual grading
+              const needsGrading = submission.quiz_answers.some((ans: any) => 
+                ans.answer_text && !ans.teacher_score && ans.teacher_score !== 0
+              );
+
+              return (
+                <div
+                  key={submission.id}
+                  className="bg-white p-6 rounded-3xl border-2 border-slate-100 hover:border-indigo-300 hover:shadow-lg transition-all"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-2">
+                        <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center">
+                          <User size={20} className="text-indigo-600" />
+                        </div>
+                        <div>
+                          <h3 className="text-lg font-black text-slate-900">
+                            {submission.student_name}
+                          </h3>
+                          <p className="text-xs text-slate-500 font-bold">{submission.student_email}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4 text-sm mt-3">
+                        <span className={`px-3 py-1 rounded-full font-bold ${
+                          percentage >= 80 ? 'bg-green-100 text-green-700' :
+                          percentage >= 60 ? 'bg-yellow-100 text-yellow-700' :
+                          'bg-red-100 text-red-700'
+                        }`}>
+                          {actualScore}/{totalPoints} ({percentage}%)
+                        </span>
+                        {needsGrading && (
+                          <span className="px-3 py-1 rounded-full bg-amber-100 text-amber-700 font-bold text-xs">
+                            Needs Grading
+                          </span>
+                        )}
+                        <span className="text-slate-500 font-bold">
+                          {new Date(submission.completed_at).toLocaleDateString()} at {new Date(submission.completed_at).toLocaleTimeString()}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setSelectedSubmission({
+                          ...submission,
+                          questions: quizQuestions
+                        });
+                      }}
+                      className="px-6 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all flex items-center gap-2"
+                    >
+                      {needsGrading ? (
+                        <>
+                          <Edit size={16} />
+                          Grade
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 size={16} />
+                          View
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Grading Detail Modal */}
+        {selectedSubmission && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setSelectedSubmission(null)}>
+            <div className="bg-white rounded-3xl max-w-4xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="sticky top-0 bg-white border-b-2 border-slate-100 p-6 rounded-t-3xl">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-2xl font-black text-slate-900">
+                      {selectedSubmission.student_name}'s Submission
+                    </h2>
+                    <p className="text-slate-500 text-sm font-bold mt-1">
+                      {new Date(selectedSubmission.completed_at).toLocaleString()}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setSelectedSubmission(null)}
+                    className="p-2 hover:bg-slate-100 rounded-full transition-all"
+                  >
+                    <X size={24} className="text-slate-600" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-6 space-y-6">
+                {selectedSubmission.questions.map((question: any, idx: number) => {
+                  const answer = selectedSubmission.quiz_answers[idx];
+                  const isCorrect = answer?.is_correct;
+                  const hasTextAnswer = answer?.answer_text;
+
+                  return (
+                    <div key={idx} className="bg-slate-50 p-6 rounded-2xl border-2 border-slate-100">
+                      <div className="flex items-start justify-between gap-4 mb-4">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="w-8 h-8 rounded-xl bg-slate-900 flex items-center justify-center font-black text-xs text-white">
+                              {idx + 1}
+                            </span>
+                            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                              {question.type}
+                            </span>
+                            <span className="text-xs font-bold text-slate-400">
+                              {question.points || 0} pts
+                            </span>
+                          </div>
+                          <p className="text-sm font-bold text-slate-900">{question.text}</p>
+                        </div>
+                        {question.type === 'multiple-choice' && (
+                          <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+                            isCorrect ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                          }`}>
+                            {isCorrect ? '✓ Correct' : '✗ Incorrect'}
+                          </span>
+                        )}
+                      </div>
+
+                      {question.type === 'multiple-choice' && question.options && (
+                        <div className="space-y-2 mt-4">
+                          {question.options.map((opt: string, optIdx: number) => {
+                            const isSelected = answer?.selected_option_index === optIdx;
+                            const isCorrectOption = question.correctAnswer === optIdx;
+
+                            return (
+                              <div
+                                key={optIdx}
+                                className={`p-3 rounded-xl border-2 ${
+                                  isSelected && isCorrectOption ? 'bg-green-50 border-green-500' :
+                                  isSelected && !isCorrectOption ? 'bg-red-50 border-red-500' :
+                                  !isSelected && isCorrectOption ? 'bg-green-50 border-green-300' :
+                                  'bg-white border-slate-200'
+                                }`}
+                              >
+                                <p className="text-sm font-bold text-slate-900">{opt}</p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {hasTextAnswer && (
+                        <div className="mt-4 space-y-3">
+                          <div className="bg-white p-4 rounded-xl border-2 border-slate-200">
+                            <p className="text-xs font-black uppercase text-slate-400 mb-2 tracking-widest">Student Answer</p>
+                            <p className="text-sm text-slate-900 font-medium leading-relaxed">{answer.answer_text}</p>
+                          </div>
+
+                          {answer.teacher_feedback && (
+                            <div className="bg-purple-50 p-4 rounded-xl border-2 border-purple-200">
+                              <p className="text-xs font-black uppercase text-purple-600 mb-2 tracking-widest flex items-center gap-1">
+                                <Sparkles size={12} />
+                                AI Feedback
+                              </p>
+                              <p className="text-sm text-slate-900 font-medium leading-relaxed">{answer.teacher_feedback}</p>
+                            </div>
+                          )}
+
+                          <div className="flex items-center gap-3">
+                            <div className="flex-1">
+                              <label className="text-xs font-black uppercase text-slate-500 tracking-widest mb-2 block">
+                                Score
+                              </label>
+                              <input
+                                type="number"
+                                min="0"
+                                max={question.points || 10}
+                                value={answer.teacher_score ?? answer.points_earned ?? ''}
+                                onChange={async (e) => {
+                                  const newScore = parseInt(e.target.value) || 0;
+                                  const maxPoints = question.points || 10;
+
+                                  if (newScore < 0 || newScore > maxPoints) {
+                                    alert(`Score must be between 0 and ${maxPoints}`);
+                                    return;
+                                  }
+
+                                  // Update in database
+                                  const { error } = await supabase
+                                    .from('quiz_answers')
+                                    .update({
+                                      teacher_score: newScore,
+                                      points_earned: newScore
+                                    })
+                                    .eq('id', answer.id);
+
+                                  if (error) {
+                                    console.error('Error updating score:', error);
+                                    alert('Failed to save score');
+                                  } else {
+                                    // Update local state
+                                    const updatedAnswers = [...selectedSubmission.quiz_answers];
+                                    updatedAnswers[idx] = { ...answer, teacher_score: newScore, points_earned: newScore };
+                                    setSelectedSubmission({
+                                      ...selectedSubmission,
+                                      quiz_answers: updatedAnswers
+                                    });
+
+                                    // Recalculate total score
+                                    const totalScore = updatedAnswers.reduce((sum, ans) => sum + (ans.points_earned || 0), 0);
+                                    await supabase
+                                      .from('quiz_attempts')
+                                      .update({ score: totalScore })
+                                      .eq('id', selectedSubmission.id);
+
+                                    // Update in the submissions list
+                                    setQuizSubmissions(quizSubmissions.map(sub =>
+                                      sub.id === selectedSubmission.id ? { ...sub, score: totalScore, quiz_answers: updatedAnswers } : sub
+                                    ));
+                                  }
+                                }}
+                                className="w-24 px-4 py-2 bg-white border-2 border-slate-200 rounded-xl font-bold text-slate-900 focus:border-indigo-500 focus:outline-none"
+                              />
+                            </div>
+                            <span className="text-slate-400 font-bold mt-6">/ {question.points || 10}</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="sticky bottom-0 bg-white border-t-2 border-slate-100 p-6 rounded-b-3xl">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-bold text-slate-500 uppercase tracking-widest">Total Score</p>
+                    <p className="text-3xl font-black text-slate-900">
+                      {selectedSubmission.quiz_answers.reduce((sum: number, ans: any) => sum + (ans.points_earned || 0), 0)} / {selectedSubmission.questions.reduce((sum: number, q: any) => sum + (q.points || 0), 0)}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setSelectedSubmission(null)}
+                    className="px-8 py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-all"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-10 animate-in fade-in duration-500 pb-24">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
@@ -1013,13 +1417,34 @@ const QuizStudio: React.FC<QuizStudioProps> = ({ onBack, book }) => {
             <p className="text-slate-500 font-medium uppercase text-[10px] tracking-widest mt-1">Source: {source?.title}</p>
           </div>
         </div>
-        <button 
-          onClick={handlePublishQuiz}
-          className="bg-slate-900 text-white px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center gap-2 hover:bg-slate-800 transition-colors"
-        >
-          <Save size={18} />
-          Publish Quiz
-        </button>
+        <div className="flex items-center gap-4">
+          {/* Auto AI Grading Toggle */}
+          <div className="bg-white rounded-2xl border-2 border-purple-200 px-6 py-3 flex items-center gap-4 shadow-sm">
+            <div className="flex items-center gap-2">
+              <Sparkles className="text-purple-600" size={20} />
+              <div>
+                <p className="text-[10px] font-black uppercase text-purple-600 tracking-widest">Auto AI Grading</p>
+                <p className="text-[9px] text-slate-500 font-bold">
+                  {enableAutoAIGrading ? 'Essays auto-graded ✨' : 'Manual grading only'}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setEnableAutoAIGrading(!enableAutoAIGrading)}
+              className="focus:outline-none transition-transform hover:scale-110"
+            >
+              {enableAutoAIGrading ? <ToggleRight size={24} className="text-purple-600" /> : <ToggleLeft size={24} className="text-slate-300" />}
+            </button>
+          </div>
+          
+          <button 
+            onClick={handlePublishQuiz}
+            className="bg-slate-900 text-white px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center gap-2 hover:bg-slate-800 transition-colors"
+          >
+            <Save size={18} />
+            Publish Quiz
+          </button>
+        </div>
       </div>
 
       <div className="grid lg:grid-cols-12 gap-10">
@@ -1099,7 +1524,12 @@ const QuizStudio: React.FC<QuizStudioProps> = ({ onBack, book }) => {
                 <button 
                   onClick={(e) => {
                     e.stopPropagation();
-                    setQuestions(questions.filter((_, idx) => idx !== i));
+                    const newQuestions = questions.filter((_, idx) => idx !== i);
+                    setQuestions(newQuestions);
+                    // Reset editing index if it's out of range after deletion
+                    if (editingIndex >= newQuestions.length) {
+                      setEditingIndex(Math.max(0, newQuestions.length - 1));
+                    }
                   }}
                   className="p-2 text-slate-300 hover:text-rose-500 transition-colors"
                 >
@@ -1215,7 +1645,7 @@ const QuizStudio: React.FC<QuizStudioProps> = ({ onBack, book }) => {
                   <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100">
                     <p className="text-[10px] font-black uppercase text-slate-400 mb-3 tracking-widest">Selected Context</p>
                     <p className="text-sm font-bold text-slate-700 leading-relaxed italic">
-                      {questions[editingIndex].text ? `"${questions[editingIndex].text}"` : "Question is currently empty..."}
+                      {questions[editingIndex]?.text ? `"${questions[editingIndex].text}"` : "Question is currently empty..."}
                     </p>
                   </div>
                 )}

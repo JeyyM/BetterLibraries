@@ -193,6 +193,7 @@ GRADING GUIDELINES:
 - Focus on whether the student grasped the main idea, not perfect wording
 - Short answers can be brief but accurate
 - Essay answers should show deeper thinking but don't require perfection
+- **CRITICAL**: Score must be between 0 and the maxPoints shown for each question. Do NOT exceed maxPoints!
 
 Grade these ${questionsAndAnswers.length} student responses. Return ONLY a valid JSON array (no markdown, no extra text):
 
@@ -239,7 +240,23 @@ Remember: Be encouraging and lenient. Reward effort and partial understanding ge
       console.warn('Grade count mismatch. Expected:', questionsAndAnswers.length, 'Got:', grades.length);
     }
 
-    return grades;
+    // Clamp scores to maxPoints and ensure consistency
+    const clampedGrades = grades.map((grade: any, idx: number) => {
+      const maxPoints = questionsAndAnswers[idx]?.maxPoints || 10;
+      const clampedScore = Math.min(Math.max(0, grade.score || 0), maxPoints);
+      
+      if (grade.score > maxPoints) {
+        console.warn(`⚠️ Score ${grade.score} exceeds max ${maxPoints} for question ${idx + 1}. Clamping to ${clampedScore}`);
+      }
+      
+      return {
+        score: clampedScore,
+        feedback: grade.feedback || 'No feedback provided.',
+        maxPoints: maxPoints
+      };
+    });
+
+    return clampedGrades;
   } catch (e) {
     console.error('Failed to batch grade answers:', e);
     // Fallback: give partial credit to all answers

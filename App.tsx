@@ -326,7 +326,7 @@ const App: React.FC = () => {
       <Route element={<Layout role={role} onLogout={() => setIsAuthenticated(false)} />}>
         {role === 'teacher' ? (
           <>
-            <Route path="/dashboard" element={<TeacherDashboard />} />
+            <Route path="/dashboard" element={<TeacherDashboard userEmail={userEmail} />} />
             <Route path="/roster" element={<StudentRoster />} />
             <Route path="/library/manage" element={<TeacherLibraryPage />} />
             <Route path="/library/add" element={<AddBookPage refreshBooks={refreshBooks} />} />

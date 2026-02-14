@@ -14,62 +14,203 @@ import {
   Zap, 
   ArrowUpRight,
   MoreVertical,
-  Calendar
+  Calendar,
+  Loader2
 } from 'lucide-react';
 import QuizStudio from './QuizStudio';
+import { supabase } from '../src/lib/supabase';
 
-const TeacherDashboard: React.FC = () => {
+interface TeacherDashboardProps {
+  userEmail: string;
+}
+
+const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ userEmail }) => {
   const [view, setView] = React.useState<'overview' | 'studio'>('overview');
-  const [liveActivities, setLiveActivities] = React.useState([
-    { id: 1, student: 'Alex Johnson', action: 'Answered Q3', detail: 'Correctly', time: 'Just now', type: 'positive' },
-    { id: 2, student: 'Maya Smith', action: 'Completed Chapter 2', detail: 'Reading Session', time: '2m ago', type: 'info' },
-    { id: 3, student: 'Liam Brown', action: 'Failed Quiz', detail: 'Score: 40%', time: '15m ago', type: 'alert' },
-  ]);
+  const [loading, setLoading] = React.useState(true);
+  const [teacherName, setTeacherName] = React.useState('');
+  const [className, setClassName] = React.useState('');
+  
+  // Stats
+  const [avgLexile, setAvgLexile] = React.useState(0);
+  const [weeklyBooks, setWeeklyBooks] = React.useState(0);
+  const [participation, setParticipation] = React.useState(0);
+  
+  // Students data
+  const [students, setStudents] = React.useState<any[]>([]);
+  const [leaderboard, setLeaderboard] = React.useState<any[]>([]);
+  
+  // Search
+  const [searchTerm, setSearchTerm] = React.useState('');
 
-  // Simulate "Live" updates locally
   React.useEffect(() => {
-    if (view !== 'overview') return;
-    const names = ['Sophia', 'Lucas', 'Emma', 'Oliver'];
-    const actions = ['Started Reading', 'Completed Quiz', 'Bookmarked Page', 'Opened Dictionary'];
-    const interval = setInterval(() => {
-      const newAct = {
-        id: Date.now(),
-        student: names[Math.floor(Math.random() * names.length)],
-        action: actions[Math.floor(Math.random() * actions.length)],
-        detail: 'Simulated interaction',
-        time: 'Just now',
-        type: 'info'
-      };
-      setLiveActivities(prev => [newAct, ...prev.slice(0, 4)]);
-    }, 15000);
-    return () => clearInterval(interval);
-  }, [view]);
+    loadDashboardData();
+  }, [userEmail]);
+
+  const loadDashboardData = async () => {
+    try {
+      setLoading(true);
+
+      // Get teacher info
+      const { data: teacherData, error: teacherError } = await supabase
+        .from('users')
+        .select('name, id')
+        .eq('email', userEmail)
+        .eq('role', 'teacher')
+        .single();
+
+      if (teacherError) {
+        console.error('❌ Teacher error:', teacherError);
+        return;
+      }
+
+      if (teacherData) {
+        setTeacherName(teacherData.name || userEmail);
+
+        // Get teacher's classes (they might have multiple, just get the first one)
+        const { data: classesData, error: classError } = await supabase
+          .from('classes')
+          .select('name, id')
+          .eq('teacher_id', teacherData.id)
+          .limit(1);
+
+        const classData = classesData?.[0];
+
+        if (classError) {
+          console.error('❌ Class error:', classError);
+          return;
+        }
+
+        if (classData) {
+          setClassName(classData.name || 'My Class');
+
+          // Get students in this class
+          const { data: enrollments } = await supabase
+            .from('class_enrollments')
+            .select('student_id')
+            .eq('class_id', classData.id)
+            .eq('status', 'active');
+
+          const studentIds = enrollments?.map(e => e.student_id) || [];
+
+          if (studentIds.length > 0) {
+            // Get student details
+            const { data: studentsData } = await supabase
+              .from('users')
+              .select('id, name, email, current_lexile_level')
+              .in('id', studentIds);
+
+            // Calculate average lexile
+            const lexileLevels = studentsData?.map(s => s.current_lexile_level || 0).filter(l => l > 0) || [];
+            const avgLex = lexileLevels.length > 0 
+              ? Math.round(lexileLevels.reduce((sum, l) => sum + l, 0) / lexileLevels.length)
+              : 0;
+            setAvgLexile(avgLex);
+
+            // Get quiz attempts from last 7 days
+            const sevenDaysAgo = new Date();
+            sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+            const { data: recentAttempts } = await supabase
+              .from('quiz_attempts')
+              .select('student_id, completed_at')
+              .in('student_id', studentIds)
+              .gte('completed_at', sevenDaysAgo.toISOString())
+              .not('completed_at', 'is', null);
+
+            setWeeklyBooks(recentAttempts?.length || 0);
+
+            // Calculate participation
+            const activeStudents = new Set(recentAttempts?.map(a => a.student_id) || []);
+            const participationRate = studentIds.length > 0 
+              ? Math.round((activeStudents.size / studentIds.length) * 100)
+              : 0;
+            setParticipation(participationRate);
+
+            // Get all quiz attempts for books read count
+            const { data: allAttempts } = await supabase
+              .from('quiz_attempts')
+              .select('student_id, id')
+              .in('student_id', studentIds)
+              .not('completed_at', 'is', null);
+
+            // Build student stats
+            const studentStats = studentsData?.map(student => {
+              const attempts = allAttempts?.filter(a => a.student_id === student.id) || [];
+              const booksRead = attempts.length;
+              const lexile = student.current_lexile_level || 400;
+              
+              // Calculate growth (mock for now, could be from student_stats table)
+              const growth = Math.floor(Math.random() * 40) - 10; // -10 to +30
+              
+              return {
+                id: student.id,
+                name: student.name || student.email || 'Unknown',
+                email: student.email || '',
+                lexile,
+                booksRead,
+                avatar: (student.name || student.email || 'U')[0].toUpperCase(),
+                level: `${lexile}L`,
+                progress: `${growth >= 0 ? '+' : ''}${growth}L`,
+                comprehension: `${Math.floor(70 + Math.random() * 25)}%`, // Mock
+                status: growth > 15 ? 'Excelling' : growth < 0 ? 'Needs Support' : 'On Track'
+              };
+            }) || [];
+
+            // Sort by books read for leaderboard
+            const sorted = [...studentStats].sort((a, b) => b.booksRead - a.booksRead);
+            setLeaderboard(sorted.slice(0, 5));
+
+            // For class monitoring, sort by lexile level
+            const byLexile = [...studentStats].sort((a, b) => a.lexile - b.lexile);
+            setStudents(byLexile);
+          } else {
+            setStudents([]);
+            setLeaderboard([]);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error loading dashboard:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
 
   if (view === 'studio') {
     return <QuizStudio onBack={() => setView('overview')} />;
   }
 
-  const students = [
-    { name: 'Maya Smith', level: '720L', progress: '+45L', lastBook: 'Echoes', status: 'Excelling', score: 98, avatar: 'M' },
-    { name: 'Alex Johnson', level: '550L', progress: '+15L', lastBook: 'Sparky', status: 'On Track', score: 88, avatar: 'A' },
-    { name: 'Sophia Davis', level: '600L', progress: '+10L', lastBook: 'Sparky', status: 'On Track', score: 92, avatar: 'S' },
-    { name: 'Liam Brown', level: '410L', progress: '-5L', lastBook: 'Physics', status: 'Needs Review', score: 65, avatar: 'L' },
-    { name: 'Ethan Hunt', level: '580L', progress: '+20L', lastBook: 'Echoes', status: 'On Track', score: 85, avatar: 'E' },
-  ];
+  const filteredStudents = students.filter(s => 
+    s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    s.email.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   const classStats = [
-    { label: 'Class Average', value: '570L', icon: TrendingUp, color: 'text-indigo-600', bg: 'bg-indigo-50' },
-    { label: 'Weekly Books', value: '42', icon: BookOpen, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-    { label: 'Participation', value: '94%', icon: Activity, color: 'text-blue-600', bg: 'bg-blue-50' },
-    { label: 'At Risk', value: '3', icon: AlertCircle, color: 'text-rose-600', bg: 'bg-rose-50' },
+    { label: 'Avg Lexile', value: `${avgLexile}L`, icon: TrendingUp, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+    { label: 'Weekly Books', value: weeklyBooks, icon: BookOpen, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+    { label: 'Participation', value: `${participation}%`, icon: Activity, color: 'text-blue-600', bg: 'bg-blue-50' },
+    { label: 'At Risk', value: '—', icon: AlertCircle, color: 'text-rose-600', bg: 'bg-rose-50' },
   ];
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <Loader2 className="animate-spin text-indigo-600" size={48} />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-700 pb-20">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-8">
         <div>
-          <h1 className="text-4xl sm:text-5xl font-black text-slate-900 tracking-tight">Grade 7B Hub</h1>
-          <p className="text-slate-600 mt-2 font-medium text-lg">You have <span className="text-indigo-600 font-bold">3 students</span> currently struggling with retention.</p>
+          <h1 className="text-4xl sm:text-5xl font-black text-slate-900 tracking-tight">
+            Welcome, {teacherName}
+          </h1>
+          <p className="text-slate-600 mt-2 font-medium text-lg">
+            {className} • {students.length} Students
+          </p>
         </div>
         <div className="flex gap-3">
           <button className="bg-white border border-slate-200 px-6 py-4 rounded-2xl text-sm font-black text-slate-600 hover:bg-slate-50 shadow-sm transition-all flex items-center gap-2 uppercase tracking-widest">
@@ -199,51 +340,52 @@ const TeacherDashboard: React.FC = () => {
               Leaderboard
             </h2>
             <div className="space-y-8">
-              {students.sort((a, b) => b.score - a.score).slice(0, 3).map((student, i) => (
-                <div key={i} className="flex items-center gap-5">
-                  <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black text-sm shadow-lg
-                    ${i === 0 ? 'bg-amber-400 text-amber-900' : i === 1 ? 'bg-slate-300 text-slate-700' : 'bg-orange-400 text-orange-900'}
-                  `}>
-                    {i + 1}
+              {leaderboard.length > 0 ? (
+                leaderboard.map((student, i) => (
+                  <div key={student.id} className="flex items-center gap-5">
+                    <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black text-sm shadow-lg
+                      ${i === 0 ? 'bg-amber-400 text-amber-900' : i === 1 ? 'bg-slate-300 text-slate-700' : 'bg-orange-400 text-orange-900'}
+                    `}>
+                      {i + 1}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-black truncate text-base leading-none text-white">{student.name}</p>
+                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-2">
+                        {student.lexile}L • {student.avgScore}% Avg
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <span className="font-black text-indigo-400 text-lg block leading-none">{student.booksRead}</span>
+                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-1 block">Books</span>
+                    </div>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-black truncate text-base leading-none text-white">{student.name}</p>
-                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-2">{student.lastBook}</p>
-                  </div>
-                  <div className="text-right">
-                    <span className="font-black text-indigo-400 text-lg block leading-none">{student.score}</span>
-                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-1 block">Points</span>
-                  </div>
+                ))
+              ) : (
+                <div className="text-center py-8 text-slate-400">
+                  <p className="text-sm font-bold">No quiz data yet</p>
                 </div>
-              ))}
+              )}
             </div>
-            <button className="w-full mt-12 py-4 bg-white/5 hover:bg-white/10 transition-all rounded-2xl text-xs font-black uppercase tracking-widest border border-white/10">
-              Full Standings
-            </button>
           </div>
 
-          <div className="bg-white p-10 rounded-[3.5rem] border border-slate-100 shadow-sm space-y-10">
+          <div className="bg-white p-10 rounded-[3.5rem] border border-slate-100 shadow-sm space-y-6">
             <h2 className="text-2xl font-black text-slate-900 flex items-center gap-3">
               <Activity className="text-indigo-600" />
-              Live Feed
+              Class Stats
             </h2>
-            <div className="space-y-8">
-              {liveActivities.map((act) => (
-                <div key={act.id} className="flex gap-4 animate-in fade-in slide-in-from-top-2 duration-500">
-                  <div className={`w-2.5 h-2.5 rounded-full mt-1.5 shrink-0 shadow-sm
-                    ${act.type === 'alert' ? 'bg-rose-500 animate-pulse' : 
-                      act.type === 'positive' ? 'bg-emerald-500' : 'bg-indigo-500'}
-                  `}></div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-black text-slate-900 leading-tight">
-                      {act.student} <span className="text-slate-500 font-bold ml-1 uppercase text-[10px] tracking-widest">· {act.time}</span>
-                    </p>
-                    <p className="text-xs text-slate-600 mt-2 font-medium">
-                      {act.action}: <span className="font-black text-indigo-600">{act.detail}</span>
-                    </p>
-                  </div>
-                </div>
-              ))}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl">
+                <span className="text-sm font-black text-slate-600">Total Students</span>
+                <span className="text-xl font-black text-slate-900">{students.length}</span>
+              </div>
+              <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl">
+                <span className="text-sm font-black text-slate-600">Active This Week</span>
+                <span className="text-xl font-black text-emerald-600">{Math.round(students.length * participation / 100)}</span>
+              </div>
+              <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl">
+                <span className="text-sm font-black text-slate-600">Total Books Read</span>
+                <span className="text-xl font-black text-indigo-600">{leaderboard.reduce((sum, s) => sum + s.booksRead, 0)}</span>
+              </div>
             </div>
           </div>
         </div>

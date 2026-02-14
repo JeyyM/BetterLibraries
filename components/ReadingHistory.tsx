@@ -1,19 +1,199 @@
 
-import React from 'react';
-import { MOCK_BOOKS, MOCK_HISTORY } from '../constants';
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../src/lib/supabase';
 import { QuizAttempt, Book } from '../types';
-import { Search, Calendar, ChevronRight, BarChart3, Clock, Sparkles, BookOpen, Trash2, ArrowLeft } from 'lucide-react';
+import { Search, Calendar, ChevronRight, BarChart3, BookOpen, Sparkles, Loader2 } from 'lucide-react';
 import ResultsView from './ResultsView';
 
-const ReadingHistory: React.FC = () => {
-  const [searchTerm, setSearchTerm] = React.useState('');
-  const [selectedAttempt, setSelectedAttempt] = React.useState<{ book: Book, attempt: QuizAttempt } | null>(null);
+interface HistoryItem {
+  attempt: QuizAttempt;
+  book: Book;
+}
 
-  const historyWithBooks = MOCK_HISTORY.map(attempt => {
-    // Note: In a real app, you'd match by bookId. Here we'll simulate based on the quizId suffix
-    const book = MOCK_BOOKS.find(b => attempt.quizId.includes(b.title.toLowerCase().split(' ')[0])) || MOCK_BOOKS[0];
-    return { attempt, book };
-  }).filter(item => item.book.title.toLowerCase().includes(searchTerm.toLowerCase()));
+const ReadingHistory: React.FC = () => {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedAttempt, setSelectedAttempt] = useState<{ book: Book, attempt: QuizAttempt } | null>(null);
+  const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [avgScore, setAvgScore] = useState(0);
+
+  useEffect(() => {
+    loadReadingHistory();
+  }, []);
+
+  const loadReadingHistory = async () => {
+    try {
+      setLoading(true);
+
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        console.log('❌ No user found');
+        return;
+      }
+
+      console.log('📚 Loading reading history for:', user.email);
+
+      // Get quiz attempts for BOOK quizzes only (not assignments)
+      const { data: attempts, error: attemptsError } = await supabase
+        .from('quiz_attempts')
+        .select('*')
+        .eq('student_id', user.id)
+        .not('book_id', 'is', null) // Only book quizzes, not assignment quizzes
+        .order('completed_at', { ascending: false });
+
+      if (attemptsError) {
+        console.error('❌ Error fetching quiz attempts:', attemptsError);
+        return;
+      }
+
+      if (!attempts || attempts.length === 0) {
+        console.log('📖 No quiz attempts found');
+        setHistoryItems([]);
+        setLoading(false);
+        return;
+      }
+
+      console.log('✅ Found', attempts.length, 'quiz attempts');
+
+      // Get unique book IDs
+      const bookIds = [...new Set(attempts.map(a => a.book_id).filter(Boolean))];
+
+      // Fetch book details
+      const { data: booksData, error: booksError } = await supabase
+        .from('books')
+        .select('id, title, author, cover_image_path, lexile_level, genre, pages, estimated_time_minutes')
+        .in('id', bookIds);
+
+      if (booksError) {
+        console.error('❌ Error fetching books:', booksError);
+        return;
+      }
+
+      console.log('✅ Found', booksData?.length || 0, 'books');
+      console.log('📊 Book data:', booksData);
+
+      // Get quiz questions for each attempt
+      const historyWithBooks: HistoryItem[] = [];
+
+      for (const attempt of attempts) {
+        console.log('🔍 Processing attempt:', {
+          id: attempt.id,
+          book_id: attempt.book_id,
+          score: attempt.score,
+          total_possible_points: attempt.total_possible_points,
+          completed_at: attempt.completed_at
+        });
+        
+        const bookData = booksData?.find(b => b.id === attempt.book_id);
+        if (!bookData) {
+          console.log('⚠️ No book data found for book_id:', attempt.book_id);
+          continue;
+        }
+        
+        console.log('📖 Book data for attempt:', {
+          title: bookData.title,
+          author: bookData.author,
+          lexile_level: bookData.lexile_level
+        });
+
+        // Get cover image URL
+        const { data: coverData } = supabase.storage
+          .from('book-covers')
+          .getPublicUrl(bookData.id + '.jpg');
+
+        // Get quiz answers for this attempt
+        const { data: answersData } = await supabase
+          .from('quiz_answers')
+          .select('*')
+          .eq('attempt_id', attempt.id)
+          .order('created_at', { ascending: true });
+
+        // Get quiz questions
+        const { data: quizData } = await supabase
+          .from('quiz_items')
+          .select('questions')
+          .eq('book_id', attempt.book_id)
+          .single();
+
+        const questions = quizData?.questions || [];
+        const studentAnswers = answersData?.map(a => a.answer_text || a.selected_option_index) || [];
+
+        const book: Book = {
+          id: bookData.id,
+          title: bookData.title,
+          author: bookData.author,
+          coverImage: coverData.publicUrl || 'https://placehold.co/300x400/6366f1/white?text=Book',
+          level: bookData.lexile_level,
+          genre: bookData.genre,
+          pages: bookData.pages,
+          estimatedTime: bookData.estimated_time_minutes ? `${bookData.estimated_time_minutes} min` : '30 min',
+          description: '',
+          fullDescription: '',
+          content: ''
+        };
+
+        const calculatedScore = Math.round(attempt.total_possible_points > 0 
+            ? (attempt.score / attempt.total_possible_points) * 100 
+            : 0);
+        
+        console.log('🧮 Score calculation:', {
+          raw_score_from_db: attempt.score,
+          total_possible_points: attempt.total_possible_points,
+          calculation: `(${attempt.score} / ${attempt.total_possible_points}) * 100`,
+          result_percentage: calculatedScore
+        });
+
+        const quizAttempt: QuizAttempt = {
+          id: attempt.id,
+          studentId: attempt.student_id,
+          quizId: attempt.quiz_id || 'book-quiz',
+          score: calculatedScore,
+          date: new Date(attempt.completed_at || attempt.started_at).toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric'
+          }),
+          aiFeedback: attempt.ai_feedback_summary ? {
+            summary: attempt.ai_feedback_summary,
+            strengths: [],
+            weaknesses: [],
+            suggestions: []
+          } : {
+            summary: 'Great work on completing this quiz!',
+            strengths: [],
+            weaknesses: [],
+            suggestions: []
+          },
+          questions: questions,
+          studentAnswers: studentAnswers,
+          lexileChange: undefined // We could fetch this from another table if we store history
+        };
+
+        historyWithBooks.push({ attempt: quizAttempt, book });
+      }
+
+      setHistoryItems(historyWithBooks);
+
+      // Calculate average score
+      if (historyWithBooks.length > 0) {
+        const total = historyWithBooks.reduce((sum, item) => sum + item.attempt.score, 0);
+        setAvgScore(Math.round(total / historyWithBooks.length));
+      }
+
+      console.log('✅ Reading history loaded:', historyWithBooks.length, 'items');
+
+    } catch (error) {
+      console.error('❌ Error loading reading history:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filteredHistory = historyItems.filter(item => 
+    item.book.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    item.book.author.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   if (selectedAttempt) {
     return (
@@ -22,6 +202,14 @@ const ReadingHistory: React.FC = () => {
         attempt={selectedAttempt.attempt} 
         onClose={() => setSelectedAttempt(null)} 
       />
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Loader2 className="w-12 h-12 text-indigo-600 animate-spin" />
+      </div>
     );
   }
 
@@ -45,7 +233,7 @@ const ReadingHistory: React.FC = () => {
       </div>
 
       <div className="grid gap-6">
-        {historyWithBooks.length > 0 ? historyWithBooks.map(({ attempt, book }) => (
+        {filteredHistory.length > 0 ? filteredHistory.map(({ attempt, book }) => (
           <div 
             key={attempt.id}
             onClick={() => setSelectedAttempt({ book, attempt })}
@@ -55,7 +243,15 @@ const ReadingHistory: React.FC = () => {
             <div className={`absolute left-0 top-0 bottom-0 w-2 ${attempt.score >= 85 ? 'bg-emerald-500' : attempt.score >= 70 ? 'bg-indigo-500' : 'bg-rose-500'}`} />
             
             <div className="shrink-0 w-24 h-32 bg-slate-50 rounded-2xl overflow-hidden shadow-md">
-              <img src={book.coverImage} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" alt={book.title} />
+              <img 
+                src={book.coverImage} 
+                className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" 
+                alt={book.title}
+                onError={(e) => {
+                  const img = e.target as HTMLImageElement;
+                  img.src = 'https://placehold.co/300x400/6366f1/white?text=Book';
+                }}
+              />
             </div>
 
             <div className="flex-1 min-w-0 space-y-3 w-full text-center sm:text-left">
@@ -71,7 +267,7 @@ const ReadingHistory: React.FC = () => {
                 </div>
                 <div className="flex items-center gap-2 text-[10px] font-black text-indigo-600 uppercase tracking-widest bg-indigo-50 px-3 py-1.5 rounded-xl">
                   <Sparkles size={14} />
-                  AI Report Ready
+                  {book.level}L
                 </div>
               </div>
             </div>
@@ -95,12 +291,14 @@ const ReadingHistory: React.FC = () => {
               <BookOpen size={48} />
             </div>
             <h3 className="text-2xl font-black text-slate-900">Shelf is empty</h3>
-            <p className="text-slate-600 mt-2 font-medium">Complete your first quiz to see your history here!</p>
+            <p className="text-slate-600 mt-2 font-medium">
+              {searchTerm ? 'No matching books found in your history.' : 'Complete your first book quiz to see your history here!'}
+            </p>
           </div>
         )}
       </div>
 
-      {historyWithBooks.length > 0 && (
+      {historyItems.length > 0 && (
         <div className="bg-slate-900 p-10 rounded-[4rem] text-white relative overflow-hidden group shadow-2xl">
           <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full -mr-32 -mt-32 blur-3xl"></div>
           <div className="relative z-10 flex flex-col md:flex-row items-center gap-10">
@@ -109,7 +307,9 @@ const ReadingHistory: React.FC = () => {
             </div>
             <div>
               <h2 className="text-2xl font-black">Growth Analytics</h2>
-              <p className="text-slate-400 mt-2 leading-relaxed">Your average comprehension score is <span className="text-indigo-400 font-black">88.5%</span> across {MOCK_HISTORY.length} books. You're showing strong aptitude for Science Fiction texts!</p>
+              <p className="text-slate-400 mt-2 leading-relaxed">
+                Your average comprehension score is <span className="text-indigo-400 font-black">{avgScore}%</span> across {historyItems.length} {historyItems.length === 1 ? 'book' : 'books'}. Keep up the great work!
+              </p>
             </div>
           </div>
         </div>

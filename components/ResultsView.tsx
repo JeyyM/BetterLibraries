@@ -343,7 +343,17 @@ const ResultsView: React.FC<ResultsViewProps> = ({ book, attempt, assignment, on
         <div className="relative z-10 flex flex-col sm:flex-row items-center justify-between gap-8">
           <div className="text-center sm:text-left">
             <h3 className="text-2xl font-black mb-2">Ready for the next challenge?</h3>
-            <p className="text-slate-400 font-medium">Your level has increased to <span className="text-indigo-400 font-black">565L</span> after this reading!</p>
+            {attempt.lexileChange ? (
+              <p className="text-slate-400 font-medium">
+                Your level {attempt.lexileChange.change >= 0 ? 'increased' : 'changed'} to{' '}
+                <span className={`font-black ${attempt.lexileChange.change >= 0 ? 'text-indigo-400' : 'text-orange-400'}`}>
+                  {attempt.lexileChange.newLexile}L
+                </span>
+                {' '}({attempt.lexileChange.change >= 0 ? '+' : ''}{attempt.lexileChange.change}L) after this reading!
+              </p>
+            ) : (
+              <p className="text-slate-400 font-medium">Keep reading to improve your level!</p>
+            )}
           </div>
           <button 
             onClick={onClose}

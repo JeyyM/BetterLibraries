@@ -4,6 +4,7 @@ import { Book, QuizQuestion, QuizAttempt, Assignment } from '../types';
 import { Brain, ArrowRight, Loader2, CheckCircle2, XCircle, Sparkles } from 'lucide-react';
 import { supabase } from '../src/lib/supabase';
 import { batchGradeAnswers } from '../services/geminiService';
+import { calculateLexileAdjustment } from '../services/lexileService';
 
 interface QuizViewProps {
   book: Book;
@@ -21,6 +22,7 @@ const QuizView: React.FC<QuizViewProps> = ({ book, assignment, userEmail, onComp
   const [loading, setLoading] = React.useState(true);
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string>('');
+  const [quizAutoGradingEnabled, setQuizAutoGradingEnabled] = React.useState(false); // For book quizzes
 
   // Fetch quiz from database on mount or use assignment questions
   React.useEffect(() => {
@@ -60,6 +62,9 @@ const QuizView: React.FC<QuizViewProps> = ({ book, assignment, userEmail, onComp
         if (data && data.questions && Array.isArray(data.questions)) {
           console.log('✅ Quiz loaded:', data.questions.length, 'questions');
           setQuestions(data.questions);
+          // Load AI grading setting from quiz_items
+          setQuizAutoGradingEnabled(data.enable_auto_ai_grading || false);
+          console.log('🤖 Quiz auto-grading enabled:', data.enable_auto_ai_grading || false);
         } else {
           setError('Quiz data is invalid. Please contact your teacher.');
         }
@@ -119,10 +124,18 @@ const QuizView: React.FC<QuizViewProps> = ({ book, assignment, userEmail, onComp
       }
     });
 
-    // Calculate score based only on multiple choice if there are essay/short answer questions
-    const score = multipleChoiceCount > 0 
+    // Calculate percentage score for display/feedback
+    const scorePercentage = multipleChoiceCount > 0 
       ? Math.round((correctCount / multipleChoiceCount) * 100)
       : 0;
+    
+    // Calculate actual points earned (for database storage)
+    const pointsEarned = questions.reduce((total, q, idx) => {
+      if (q.type === 'multiple-choice' && answers[idx] === q.correctAnswer) {
+        return total + (q.points || 0);
+      }
+      return total;
+    }, 0);
     
     // Count question types for smarter feedback
     const hasShortAnswer = questions.some(q => q.type === 'short-answer');
@@ -140,45 +153,45 @@ const QuizView: React.FC<QuizViewProps> = ({ book, assignment, userEmail, onComp
     // Build summary based on score and pending grading
     let summary = '';
     if (hasEssayOrShortAnswer) {
-      if (score === 100) {
+      if (scorePercentage === 100) {
         summary = `Outstanding! You achieved a perfect score on all ${multipleChoiceCount} multiple-choice questions for ${book.title}. `;
         summary += hasEssay 
           ? `Your essay responses are under review - keep up the excellent analytical thinking!`
           : `Your written answers are being reviewed by your teacher.`;
-      } else if (score >= 90) {
-        summary = `Excellent work! You scored ${score}% on the multiple-choice questions for ${book.title}. `;
+      } else if (scorePercentage >= 90) {
+        summary = `Excellent work! You scored ${scorePercentage}% on the multiple-choice questions for ${book.title}. `;
         summary += `Your written responses will be graded by your teacher to complete your assessment.`;
-      } else if (score >= 70) {
-        summary = `Good job! You scored ${score}% on the multiple-choice questions. `;
+      } else if (scorePercentage >= 70) {
+        summary = `Good job! You scored ${scorePercentage}% on the multiple-choice questions. `;
         summary += hasEssay
           ? `Your essay answers may help improve your final score - make sure you expressed your ideas clearly!`
           : `Your written responses are being reviewed and may boost your final grade.`;
       } else {
-        summary = `You scored ${score}% on the multiple-choice portion. `;
+        summary = `You scored ${scorePercentage}% on the multiple-choice portion. `;
         summary += `Your teacher will review your written responses - thoughtful answers there can significantly improve your final score.`;
       }
     } else {
-      if (score >= 90) {
-        summary = `Excellent work! You scored ${score}% on ${book.title}, demonstrating strong comprehension.`;
-      } else if (score >= 70) {
-        summary = `Good job! You scored ${score}% on ${book.title}, showing solid understanding.`;
-      } else if (score >= 50) {
-        summary = `You scored ${score}% on ${book.title}. You understand the basics but can improve.`;
+      if (scorePercentage >= 90) {
+        summary = `Excellent work! You scored ${scorePercentage}% on ${book.title}, demonstrating strong comprehension.`;
+      } else if (scorePercentage >= 70) {
+        summary = `Good job! You scored ${scorePercentage}% on ${book.title}, showing solid understanding.`;
+      } else if (scorePercentage >= 50) {
+        summary = `You scored ${scorePercentage}% on ${book.title}. You understand the basics but can improve.`;
       } else {
-        summary = `You scored ${score}% on ${book.title}. This book may be challenging for your current level.`;
+        summary = `You scored ${scorePercentage}% on ${book.title}. This book may be challenging for your current level.`;
       }
     }
     feedback.summary = summary;
 
     // Build strengths based on score and question types
     const strengths: string[] = [];
-    if (score >= 90) {
+    if (scorePercentage >= 90) {
       strengths.push('Excellent comprehension of the reading material');
       if (multipleChoiceCount > 0) strengths.push(`Strong performance on factual recall questions`);
-    } else if (score >= 70) {
+    } else if (scorePercentage >= 70) {
       strengths.push('Good understanding of main plot and characters');
-      if (score >= 80) strengths.push('Solid grasp of key story details');
-    } else if (score >= 50) {
+      if (scorePercentage >= 80) strengths.push('Solid grasp of key story details');
+    } else if (scorePercentage >= 50) {
       strengths.push('Basic understanding of the story');
       strengths.push('Completed all questions - good effort!');
     } else {
@@ -190,7 +203,7 @@ const QuizView: React.FC<QuizViewProps> = ({ book, assignment, userEmail, onComp
     // Build suggestions based on score, question types, and what they need
     const suggestions: string[] = [];
     
-    if (hasEssayOrShortAnswer && score === 100) {
+    if (hasEssayOrShortAnswer && scorePercentage === 100) {
       // Perfect MC score with pending essays
       suggestions.push('While you wait for grading, consider what made this book engaging for you');
       if (hasEssay) {
@@ -198,7 +211,7 @@ const QuizView: React.FC<QuizViewProps> = ({ book, assignment, userEmail, onComp
         suggestions.push('Practice connecting themes to real-world situations for deeper analysis');
       }
       suggestions.push('Challenge yourself with books at the next Lexile level');
-    } else if (score >= 90) {
+    } else if (scorePercentage >= 90) {
       // High score - encourage advancement
       if (hasEssay) {
         suggestions.push('Continue developing your analytical writing skills');
@@ -207,7 +220,7 @@ const QuizView: React.FC<QuizViewProps> = ({ book, assignment, userEmail, onComp
         suggestions.push('Try answering practice questions in more detail to build essay skills');
       }
       suggestions.push('Look for books that explore similar themes at higher complexity');
-    } else if (score >= 70) {
+    } else if (scorePercentage >= 70) {
       // Good score - targeted improvement
       if (hasEssay) {
         suggestions.push('When writing essays, use specific quotes and examples from the text');
@@ -217,7 +230,7 @@ const QuizView: React.FC<QuizViewProps> = ({ book, assignment, userEmail, onComp
       }
       suggestions.push('Re-read sections where you felt less confident');
       suggestions.push('Discuss the book with classmates to gain new perspectives');
-    } else if (score >= 50) {
+    } else if (scorePercentage >= 50) {
       // Struggling - needs support
       suggestions.push('Try reading the book again at a slower pace, taking notes');
       if (hasEssay || hasShortAnswer) {
@@ -260,8 +273,9 @@ const QuizView: React.FC<QuizViewProps> = ({ book, assignment, userEmail, onComp
           quiz_id: null, // We don't have a quiz_id for assignment questions
           student_id: studentId,
           assignment_id: assignment?.id || null,
+          book_id: book.id, // Add book reference for teacher grading view
           completed_at: new Date().toISOString(),
-          score: score,
+          score: pointsEarned,
           total_possible_points: questions.reduce((sum, q) => sum + (q.points || 0), 0),
           ai_feedback_summary: feedback.summary,
           status: 'completed'
@@ -324,7 +338,7 @@ const QuizView: React.FC<QuizViewProps> = ({ book, assignment, userEmail, onComp
             student_id: studentId,
             quiz_attempt_id: attemptData.id,
             submitted_at: new Date().toISOString(),
-            total_score: score,
+            total_score: pointsEarned,
             total_possible_score: totalPossibleScore,
             is_late: isLate,
             is_reviewed: false
@@ -336,16 +350,20 @@ const QuizView: React.FC<QuizViewProps> = ({ book, assignment, userEmail, onComp
           console.error('Error saving assignment submission:', submissionError);
         } else {
           console.log('✅ Assignment submission saved');
-          
-          // Auto-grade essay/short-answer questions if enabled
-          console.log('🔍 Checking auto-grading settings:', {
-            hasAssignment: !!assignment,
-            enableAutoAIGrading: assignment?.enableAutoAIGrading,
-            assignmentData: assignment
-          });
-          
-          if (assignment.enableAutoAIGrading) {
-            console.log('🤖 Auto AI Grading enabled - grading essay/short-answer questions...');
+        }
+      }
+
+      // Auto-grade essay/short-answer questions if enabled (for both assignments and book quizzes)
+      const shouldAutoGrade = assignment?.enableAutoAIGrading || quizAutoGradingEnabled;
+      console.log('🔍 Checking auto-grading settings:', {
+        hasAssignment: !!assignment,
+        assignmentAutoGrading: assignment?.enableAutoAIGrading,
+        quizAutoGrading: quizAutoGradingEnabled,
+        shouldAutoGrade
+      });
+      
+      if (shouldAutoGrade) {
+        console.log('🤖 Auto AI Grading enabled - grading essay/short-answer questions...');
             
             try {
               // Get the answer IDs that were just inserted
@@ -434,17 +452,29 @@ const QuizView: React.FC<QuizViewProps> = ({ book, assignment, userEmail, onComp
                   }, 0);
                   const totalScore = mcScore + aiGradedScore;
 
-                  // Update submission with AI-graded total score
-                  await supabase
-                    .from('assignment_submissions')
-                    .update({
-                      total_score: totalScore,
-                      grading_status: 'ai-graded'
-                    })
-                    .eq('assignment_id', assignment.id)
-                    .eq('student_id', studentId);
+                  // Update submission with AI-graded total score (only for assignments)
+                  if (assignment) {
+                    await supabase
+                      .from('assignment_submissions')
+                      .update({
+                        total_score: totalScore,
+                        grading_status: 'ai-graded'
+                      })
+                      .eq('assignment_id', assignment.id)
+                      .eq('student_id', studentId);
 
-                  console.log(`✅ Total score updated: ${totalScore} (MC: ${mcScore} + AI: ${aiGradedScore})`);
+                    console.log(`✅ Assignment total score updated: ${totalScore} (MC: ${mcScore} + AI: ${aiGradedScore})`);
+                  } else {
+                    // For standalone book quizzes, update the quiz attempt
+                    await supabase
+                      .from('quiz_attempts')
+                      .update({
+                        score: totalScore
+                      })
+                      .eq('id', attemptData.id);
+
+                    console.log(`✅ Quiz total score updated: ${totalScore} (MC: ${mcScore} + AI: ${aiGradedScore})`);
+                  }
                 } else {
                   console.log('⚠️ No questions to auto-grade');
                 }
@@ -453,9 +483,61 @@ const QuizView: React.FC<QuizViewProps> = ({ book, assignment, userEmail, onComp
               console.error('❌ Auto AI grading failed:', aiError);
               // Don't block submission if AI grading fails
             }
-          } else {
-            console.log('ℹ️ Auto AI Grading not enabled for this assignment');
+      } else {
+        console.log('ℹ️ Auto AI Grading not enabled');
+      }
+
+      // Update student lexile if this is a BOOK QUIZ (not an assignment)
+      let lexileChangeData: { oldLexile: number; newLexile: number; change: number; reason: string } | undefined;
+      
+      if (!assignment) {
+        try {
+          console.log('📊 Calculating lexile adjustment...');
+          
+          // Get student's current lexile
+          const { data: currentUser } = await supabase
+            .from('users')
+            .select('current_lexile_level')
+            .eq('id', studentId)
+            .single();
+
+          if (currentUser) {
+            const currentLexile = currentUser.current_lexile_level || 400;
+            const bookLexile = book.lexile_level || 400;
+            const totalPossible = questions.reduce((sum, q) => sum + (q.points || 0), 0);
+            const scorePercentageForLexile = totalPossible > 0 
+              ? (pointsEarned / totalPossible) * 100 
+              : 0;
+
+            const adjustment = calculateLexileAdjustment(
+              currentLexile,
+              bookLexile,
+              scorePercentageForLexile
+            );
+
+            // Update user's lexile level
+            await supabase
+              .from('users')
+              .update({ current_lexile_level: adjustment.newLexile })
+              .eq('id', studentId);
+
+            console.log(`✨ Lexile updated: ${currentLexile}L → ${adjustment.newLexile}L (${adjustment.change >= 0 ? '+' : ''}${adjustment.change}L)`);
+            console.log(`   Reason: ${adjustment.reason}`);
+
+            // Store for display
+            lexileChangeData = {
+              oldLexile: currentLexile,
+              newLexile: adjustment.newLexile,
+              change: adjustment.change,
+              reason: adjustment.reason
+            };
+
+            // Store feedback with lexile info
+            feedback.summary = `${feedback.summary}\n\n**Lexile Progress:** ${adjustment.reason}\nYour lexile level changed from ${currentLexile}L to ${adjustment.newLexile}L (${adjustment.change >= 0 ? '+' : ''}${adjustment.change}L)`;
           }
+        } catch (lexileError) {
+          console.error('❌ Failed to update lexile:', lexileError);
+          // Don't block quiz completion if lexile update fails
         }
       }
 
@@ -464,11 +546,12 @@ const QuizView: React.FC<QuizViewProps> = ({ book, assignment, userEmail, onComp
         id: attemptData.id,
         studentId: studentId,
         quizId: attemptData.quiz_id || 'assignment',
-        score,
+        score: scorePercentage,
         date: attemptData.completed_at,
         aiFeedback: feedback,
         questions: questions,
-        studentAnswers: combinedAnswers
+        studentAnswers: combinedAnswers,
+        lexileChange: lexileChangeData
       };
 
       setTimeout(() => {
@@ -539,11 +622,12 @@ const QuizView: React.FC<QuizViewProps> = ({ book, assignment, userEmail, onComp
 
   const currentQuestion = questions[currentQuestionIndex];
   const progress = ((currentQuestionIndex + 1) / questions.length) * 100;
+  const shouldAutoGrade = assignment?.enableAutoAIGrading || quizAutoGradingEnabled;
 
   return (
     <div className="max-w-3xl mx-auto py-8 px-4 animate-in fade-in duration-500">
       {/* AI Grading Banner */}
-      {assignment?.enableAutoAIGrading && (
+      {shouldAutoGrade && (
         <div className="mb-6 bg-gradient-to-r from-purple-50 to-indigo-50 border-2 border-purple-200 rounded-3xl p-6 animate-in slide-in-from-top duration-500">
           <div className="flex items-start gap-4">
             <div className="bg-purple-600 p-2 rounded-xl">

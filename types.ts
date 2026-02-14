@@ -131,6 +131,12 @@ export interface QuizAttempt {
   };
   questions?: QuizQuestion[]; // The quiz questions
   studentAnswers?: (number | string)[]; // Student's answers (index for MC, text for short/essay)
+  lexileChange?: {
+    oldLexile: number;
+    newLexile: number;
+    change: number;
+    reason: string;
+  };
 }
 
 export interface ReadingProgress {
