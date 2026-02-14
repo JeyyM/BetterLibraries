@@ -1,6 +1,7 @@
 
 import React from 'react';
 import { UserRole } from '../types';
+import { supabase } from '../src/lib/supabase';
 import { 
   BookOpen, 
   GraduationCap, 
@@ -16,7 +17,7 @@ import {
 } from 'lucide-react';
 
 interface LoginProps {
-  onLogin: (role: UserRole) => void;
+  onLogin: (role: UserRole, email: string) => void;
 }
 
 const Login: React.FC<LoginProps> = ({ onLogin }) => {
@@ -24,15 +25,66 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [email, setEmail] = React.useState('');
   const [password, setPassword] = React.useState('');
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [error, setError] = React.useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Demo accounts for easy access
+  const demoAccounts = {
+    student: [
+      'john.doe@email.com',
+      'jane.smith@email.com',
+      'michael.johnson@email.com',
+      'emily.williams@email.com',
+      'david.brown@email.com',
+      'sarah.jones@email.com',
+      'william.anderson@email.com',
+      'patricia.taylor@email.com'
+    ],
+    teacher: [
+      'jerrysmith@email.com'
+    ]
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
-    // Simulate API delay
-    setTimeout(() => {
-      onLogin(selectedRole!);
+    setError('');
+
+    try {
+      const userEmail = email || (selectedRole === 'teacher' ? 'jerrysmith@email.com' : 'john.doe@email.com');
+      const userPassword = password || '123'; // Default password is "123"
+
+      console.log('🔐 Attempting login with:', userEmail);
+
+      // Try to sign in with Supabase
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
+        email: userEmail,
+        password: userPassword,
+      });
+
+      if (signInError) {
+        console.error('❌ Login error:', signInError);
+        
+        // For demo purposes: If user doesn't exist, just proceed anyway
+        console.warn('⚠️ User not found in auth, proceeding with demo mode');
+        alert(`Note: User ${userEmail} not found in database. Create this user in Supabase Dashboard > Authentication > Users with password "123"`);
+        
+        // Continue to app anyway for demo
+        onLogin(selectedRole!, userEmail);
+        return;
+      }
+
+      console.log('✅ Login successful:', data.user?.email);
+      onLogin(selectedRole!, userEmail);
+    } catch (err: any) {
+      console.error('❌ Unexpected error:', err);
+      setError(err.message || 'Login failed. Please try again.');
+    } finally {
       setIsSubmitting(false);
-    }, 800);
+    }
+  };
+
+  const handleDemoEmailClick = (demoEmail: string) => {
+    setEmail(demoEmail);
   };
 
   if (!selectedRole) {
@@ -107,82 +159,112 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center p-6 relative">
-      <div className="max-w-md w-full animate-in fade-in slide-in-from-bottom-8 duration-500">
-        <button 
-          onClick={() => setSelectedRole(null)}
-          className="flex items-center gap-2 text-slate-500 hover:text-slate-900 mb-8 font-black uppercase text-[10px] tracking-widest transition-all"
-        >
-          <ChevronLeft size={16} />
-          Go Back
-        </button>
+      <div className="max-w-6xl w-full grid md:grid-cols-[1fr_300px] gap-8 animate-in fade-in slide-in-from-bottom-8 duration-500">
+        <div>
+          <button 
+            onClick={() => setSelectedRole(null)}
+            className="flex items-center gap-2 text-slate-500 hover:text-slate-900 mb-8 font-black uppercase text-[10px] tracking-widest transition-all"
+          >
+            <ChevronLeft size={16} />
+            Go Back
+          </button>
 
-        <div className="bg-white p-12 rounded-[4rem] border border-slate-100 shadow-2xl relative overflow-hidden">
-          <div className={`absolute top-0 left-0 w-full h-2 ${selectedRole === 'student' ? 'bg-indigo-600' : 'bg-emerald-500'}`}></div>
-          
-          <div className="text-center mb-10">
-            <div className={`w-20 h-20 rounded-[2.5rem] flex items-center justify-center mx-auto mb-6 shadow-xl ${selectedRole === 'student' ? 'bg-indigo-50 text-indigo-600 shadow-indigo-100' : 'bg-emerald-50 text-emerald-600 shadow-emerald-100'}`}>
-              {selectedRole === 'student' ? <GraduationCap size={40} /> : <ShieldCheck size={40} />}
-            </div>
-            <h2 className="text-3xl font-black text-slate-900">Welcome Back</h2>
-            <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest mt-2">
-              Logging into {selectedRole} portal
-            </p>
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="space-y-2">
-              <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-4">Email Address</label>
-              <div className="relative">
-                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                <input 
-                  required
-                  type="email" 
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  placeholder="alex@school.edu"
-                  className="w-full bg-slate-50 border-none rounded-2xl py-4 pl-12 pr-6 text-sm font-bold text-slate-900 placeholder-slate-400 focus:ring-4 focus:ring-indigo-50 transition-all"
-                />
+          <div className="bg-white p-12 rounded-[4rem] border border-slate-100 shadow-2xl relative overflow-hidden">
+            <div className={`absolute top-0 left-0 w-full h-2 ${selectedRole === 'student' ? 'bg-indigo-600' : 'bg-emerald-500'}`}></div>
+            
+            <div className="text-center mb-10">
+              <div className={`w-20 h-20 rounded-[2.5rem] flex items-center justify-center mx-auto mb-6 shadow-xl ${selectedRole === 'student' ? 'bg-indigo-50 text-indigo-600 shadow-indigo-100' : 'bg-emerald-50 text-emerald-600 shadow-emerald-100'}`}>
+                {selectedRole === 'student' ? <GraduationCap size={40} /> : <ShieldCheck size={40} />}
               </div>
+              <h2 className="text-3xl font-black text-slate-900">Welcome Back</h2>
+              <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest mt-2">
+                Logging into {selectedRole} portal
+              </p>
             </div>
 
-            <div className="space-y-2">
-              <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-4">Access Code</label>
-              <div className="relative">
-                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                <input 
-                  required
-                  type="password" 
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full bg-slate-50 border-none rounded-2xl py-4 pl-12 pr-6 text-sm font-bold text-slate-900 placeholder-slate-400 focus:ring-4 focus:ring-indigo-50 transition-all"
-                />
-              </div>
-            </div>
-
-            <button 
-              type="submit"
-              disabled={isSubmitting}
-              className={`w-full py-5 rounded-[2rem] font-black text-sm uppercase tracking-widest shadow-xl transition-all flex items-center justify-center gap-3 active:scale-95
-                ${selectedRole === 'student' ? 'bg-indigo-600 text-white shadow-indigo-100 hover:bg-indigo-700' : 'bg-emerald-600 text-white shadow-emerald-100 hover:bg-emerald-700'}
-                ${isSubmitting ? 'opacity-50 cursor-not-allowed' : ''}
-              `}
-            >
-              {isSubmitting ? (
-                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-              ) : (
-                <>
-                  Log In
-                  <ArrowRight size={20} />
-                </>
+            <form onSubmit={handleSubmit} className="space-y-6">
+              {error && (
+                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-2xl text-sm font-medium">
+                  {error}
+                </div>
               )}
-            </button>
-          </form>
+              
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-4">Email Address</label>
+                <div className="relative">
+                  <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                  <input 
+                    type="email" 
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    placeholder={selectedRole === 'teacher' ? 'jerrysmith@email.com' : 'john.doe@email.com'}
+                    className="w-full bg-slate-50 border-none rounded-2xl py-4 pl-12 pr-6 text-sm font-bold text-slate-900 placeholder-slate-400 focus:ring-4 focus:ring-indigo-50 transition-all"
+                  />
+                </div>
+              </div>
 
-          <div className="mt-10 text-center">
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-              Trouble logging in? Contact IT Support
-            </p>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-4">Password</label>
+                <div className="relative">
+                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                  <input 
+                    type="password" 
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    placeholder="123 (default)"
+                    className="w-full bg-slate-50 border-none rounded-2xl py-4 pl-12 pr-6 text-sm font-bold text-slate-900 placeholder-slate-400 focus:ring-4 focus:ring-indigo-50 transition-all"
+                  />
+                </div>
+              </div>
+
+              <button 
+                type="submit"
+                disabled={isSubmitting}
+                className={`w-full py-5 rounded-[2rem] font-black text-sm uppercase tracking-widest shadow-xl transition-all flex items-center justify-center gap-3 active:scale-95
+                  ${selectedRole === 'student' ? 'bg-indigo-600 text-white shadow-indigo-100 hover:bg-indigo-700' : 'bg-emerald-600 text-white shadow-emerald-100 hover:bg-emerald-700'}
+                  ${isSubmitting ? 'opacity-50 cursor-not-allowed' : ''}
+                `}
+              >
+                {isSubmitting ? (
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                ) : (
+                  <>
+                    Let's Go!
+                    <ArrowRight size={20} />
+                  </>
+                )}
+              </button>
+            </form>
+
+            <div className="mt-10 text-center">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                Trouble logging in? Contact IT Support
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Demo Accounts Panel */}
+        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-lg h-fit">
+          <h3 className="text-xs font-black uppercase tracking-widest text-slate-500 mb-4">Quick Login</h3>
+          <p className="text-xs text-slate-400 mb-4 font-medium">Click to autofill</p>
+          <div className="space-y-2">
+            {demoAccounts[selectedRole || 'student'].map((demoEmail) => (
+              <button
+                key={demoEmail}
+                type="button"
+                onClick={() => handleDemoEmailClick(demoEmail)}
+                className={`w-full text-left px-4 py-3 rounded-xl text-xs font-bold transition-all ${
+                  email === demoEmail
+                    ? selectedRole === 'student' 
+                      ? 'bg-indigo-50 text-indigo-700 border-2 border-indigo-200'
+                      : 'bg-emerald-50 text-emerald-700 border-2 border-emerald-200'
+                    : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border-2 border-transparent'
+                }`}
+              >
+                {demoEmail}
+              </button>
+            ))}
           </div>
         </div>
       </div>

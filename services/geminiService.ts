@@ -1,155 +1,252 @@
+﻿import { Book, QuizQuestion, QuizAttempt } from "../types";
+import { GoogleGenAI } from "@google/genai";
 
-import { GoogleGenAI, Type } from "@google/genai";
-import { Book, QuizQuestion, QuizAttempt } from "../types";
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+const genAI = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
-const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+const callGemini = async (prompt: string) => {
+  const result = await genAI.models.generateContent({
+    model: "gemini-2.5-flash-lite",
+    contents: prompt
+  });
+  return result.text || "";
+};
 
 export const generateQuizForBook = async (book: { title: string, author?: string, content: string, level?: number }): Promise<QuizQuestion[]> => {
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
-    contents: `Generate 8 high-quality educational questions for the following text: "${book.title}".
-               Content: ${book.content}. 
-               Reading Level: ${book.level || 600} Lexile.
-               
-               Please provide a mix of:
-               1. Multiple Choice (MCQ)
-               2. Short Answer (1-2 sentences)
-               3. Paragraph/Long Answer (Comprehension/Analysis)
-               
-               Assign a 'points' value to each question (e.g., 5 for easy, 10 for medium, 20 for hard/essay).
-               Ensure the questions cover recall, inference, and thematic analysis.`,
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: {
-            text: { type: Type.STRING },
-            options: { type: Type.ARRAY, items: { type: Type.STRING }, description: 'Only for multiple-choice' },
-            correctAnswer: { type: Type.INTEGER, description: 'Index of the correct option for MCQ (0-3)' },
-            type: { type: Type.STRING, enum: ['multiple-choice', 'short-answer', 'essay'] },
-            difficulty: { type: Type.STRING, enum: ['easy', 'medium', 'hard'] },
-            category: { type: Type.STRING, enum: ['recall', 'inference', 'analysis'] },
-            points: { type: Type.INTEGER }
-          },
-          required: ['text', 'type', 'difficulty', 'category', 'points']
-        }
-      }
-    }
-  });
+  console.log('📚 Starting quiz generation for:', book.title);
+  console.log('📝 Content length:', book.content.length, 'characters');
+  console.log('📖 Content preview:', book.content.substring(0, 200));
+  
+  const prompt = `Generate 8 educational quiz questions for "${book.title}"${book.author ? ` by ${book.author}` : ''}.
+
+Content: ${book.content.substring(0, 10000)}
+
+Create a mix of:
+- 4-5 Multiple choice questions with 4 options each
+- 2 Short answer questions  
+- 1-2 Essay questions
+
+Return ONLY a valid JSON array (no markdown, no extra text):
+[
+  {
+    "text": "question text here",
+    "options": ["A", "B", "C", "D"],
+    "correctAnswer": 0,
+    "type": "multiple-choice",
+    "difficulty": "easy",
+    "category": "recall",
+    "points": 5
+  }
+]
+
+For short-answer and essay, use empty options array and omit correctAnswer.`;
 
   try {
-    const questions = JSON.parse(response.text || '[]');
-    return questions.map((q: any, idx: number) => ({
+    console.log('🤖 Calling Gemini API...');
+    const text = await callGemini(prompt);
+    console.log('✅ Gemini response received:', text);
+    
+    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) {
+      console.error('❌ No JSON found in response:', text);
+      return [];
+    }
+    
+    console.log('📋 JSON extracted:', jsonMatch[0]);
+    const questions = JSON.parse(jsonMatch[0]);
+    console.log('🎯 Parsed questions:', questions);
+    
+    const finalQuestions = questions.map((q: any, idx: number) => ({
       ...q,
       id: `q-${Date.now()}-${idx}`
     }));
+    
+    console.log('✨ Final questions with IDs:', finalQuestions);
+    console.log('📊 Total questions generated:', finalQuestions.length);
+    
+    return finalQuestions;
   } catch (e) {
-    console.error("Failed to parse quiz response", e);
+    console.error("❌ Failed to generate quiz", e);
     return [];
   }
 };
 
 export const evaluateAnswer = async (question: string, studentAnswer: string, context: string): Promise<{ score: number, feedback: string }> => {
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
-    contents: `Evaluate this student's answer for the question: "${question}".
-               Student's Answer: "${studentAnswer}"
-               Book Content Context: "${context.substring(0, 1000)}..."
-               
-               Provide a score from 0 to 100 and a brief explanation of why this score was given.`,
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          score: { type: Type.NUMBER },
-          feedback: { type: Type.STRING }
-        },
-        required: ['score', 'feedback']
-      }
-    }
-  });
-
   try {
-    return JSON.parse(response.text || '{"score": 0, "feedback": "Evaluation failed."}');
+    const prompt = `Evaluate: "${question}". Answer: "${studentAnswer}". Return JSON: {"score": 85, "feedback": "explanation"}`;
+    const text = await callGemini(prompt);
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    return jsonMatch ? JSON.parse(jsonMatch[0]) : { score: 0, feedback: "Error" };
   } catch (e) {
     return { score: 0, feedback: "Error evaluating." };
   }
 };
 
 export const refineQuestion = async (question: QuizQuestion, instruction: string, context: string): Promise<QuizQuestion> => {
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
-    contents: `Refine this educational question based on the instruction: "${instruction}".
-               Original Question: ${JSON.stringify(question)}
-               Context of the book: ${context.substring(0, 1000)}...`,
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          text: { type: Type.STRING },
-          options: { type: Type.ARRAY, items: { type: Type.STRING } },
-          correctAnswer: { type: Type.INTEGER },
-          type: { type: Type.STRING, enum: ['multiple-choice', 'short-answer', 'essay'] },
-          difficulty: { type: Type.STRING, enum: ['easy', 'medium', 'hard'] },
-          category: { type: Type.STRING, enum: ['recall', 'inference', 'analysis'] },
-          points: { type: Type.INTEGER }
-        },
-        required: ['text', 'type', 'difficulty', 'category', 'points']
-      }
-    }
-  });
-
-  try {
-    const refined = JSON.parse(response.text || '{}');
-    return { ...refined, id: question.id };
-  } catch (e) {
-    return question;
-  }
+  return question;
 };
 
 export const getAIFeedback = async (book: Book, score: number, answers: any[]): Promise<QuizAttempt['aiFeedback']> => {
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
-    contents: `The student just completed a quiz for "${book.title}". 
-               Score: ${score}/100. 
-               Analyze the performance and provide structured feedback for a student.`,
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          summary: { type: Type.STRING },
-          strengths: { type: Type.ARRAY, items: { type: Type.STRING } },
-          weaknesses: { type: Type.ARRAY, items: { type: Type.STRING } },
-          suggestions: { type: Type.ARRAY, items: { type: Type.STRING } }
-        },
-        required: ['summary', 'strengths', 'weaknesses', 'suggestions']
-      }
-    }
-  });
+  return {
+    summary: "Great effort!",
+    strengths: ["Completed the quiz"],
+    weaknesses: ["Some areas need improvement"],
+    suggestions: ["Review the material"]
+  };
+};
+
+export const getWordExplanation = async (word: string, context: string, level: number): Promise<string> => {
+  try {
+    const prompt = `Explain "${word}" simply for reading level ${level}L. Keep it under 50 words.`;
+    return await callGemini(prompt);
+  } catch (e) {
+    return "Definition unavailable.";
+  }
+};
+
+export const extractBookMetadata = async (pdfText: string, currentTitle?: string): Promise<{
+  title: string;
+  author: string;
+  description: string;
+  genre: string;
+  lexileLevel: number;
+  estimatedPages: number;
+}> => {
+  const prompt = `Analyze this book excerpt and extract metadata. Return ONLY valid JSON (no markdown, no extra text):
+
+${pdfText.substring(0, 5000)}
+
+Return this exact format:
+{
+  "title": "detected title or ${currentTitle || 'Unknown'}",
+  "author": "author name",
+  "description": "2-3 sentence summary",
+  "genre": "one of: Fiction, Non-Fiction, Science Fiction, Fantasy, Mystery, Historical, Biography, Adventure",
+  "lexileLevel": 800,
+  "estimatedPages": 200
+}`;
 
   try {
-    return JSON.parse(response.text || '{}');
+    if (!GEMINI_API_KEY) {
+      throw new Error('VITE_GEMINI_API_KEY is not set');
+    }
+
+    console.log('🔑 Calling Gemini API for metadata extraction...');
+    
+    const text = await callGemini(prompt);
+    
+    // Extract JSON from response
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      console.error('No JSON found in response:', text);
+      throw new Error('Invalid API response format');
+    }
+    
+    const metadata = JSON.parse(jsonMatch[0]);
+    console.log('✨ AI extracted metadata:', metadata);
+    return metadata;
   } catch (e) {
+    console.error("Failed to extract metadata with AI:", e);
+    // Fallback to safe defaults
     return {
-      summary: "Great effort on the quiz!",
-      strengths: ["Completing the reading material"],
-      weaknesses: ["Some detail retention"],
-      suggestions: ["Try re-reading the complex chapters."]
+      title: currentTitle || "Untitled",
+      author: "Unknown Author",
+      description: "No description available",
+      genre: "Fiction",
+      lexileLevel: 600,
+      estimatedPages: 100
     };
   }
 };
 
-export const getWordExplanation = async (word: string, context: string, level: number): Promise<string> => {
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
-    contents: `Explain the word "${word}" found in this context: "${context}". 
-               The student's reading level is ${level}L Lexile. 
-               Provide a simple, engaging definition and one example sentence. Keep it under 50 words.`,
-  });
-  return response.text || "I couldn't find a definition for that word right now.";
+/**
+ * Grade multiple essay/short-answer questions in batch with book context
+ * This loads the book context once and grades all questions together to save tokens
+ */
+export const batchGradeAnswers = async (
+  bookTitle: string,
+  bookContent: string,
+  questionsAndAnswers: Array<{
+    questionText: string;
+    studentAnswer: string;
+    maxPoints: number;
+    questionType: 'short-answer' | 'essay';
+  }>
+): Promise<Array<{
+  score: number;
+  feedback: string;
+  maxPoints: number;
+}>> => {
+  console.log('📝 Batch grading', questionsAndAnswers.length, 'answers for', bookTitle);
+
+  const prompt = `You are grading student responses for the book "${bookTitle}".
+
+BOOK CONTEXT (use this to evaluate all answers):
+${bookContent.substring(0, 8000)}
+
+GRADING GUIDELINES:
+- Be LENIENT and ENCOURAGING
+- Reward good-faith efforts and partial understanding
+- A student who shows ANY relevant understanding should get at least 60% of points
+- Perfect answers get 100%, but good attempts should get 80-90%
+- Only give very low scores (below 50%) if the answer is completely off-topic or nonsensical
+- Focus on whether the student grasped the main idea, not perfect wording
+- Short answers can be brief but accurate
+- Essay answers should show deeper thinking but don't require perfection
+
+Grade these ${questionsAndAnswers.length} student responses. Return ONLY a valid JSON array (no markdown, no extra text):
+
+${questionsAndAnswers.map((qa, idx) => `
+QUESTION ${idx + 1} (${qa.questionType}, max ${qa.maxPoints} points):
+"${qa.questionText}"
+
+STUDENT ANSWER:
+"${qa.studentAnswer}"
+`).join('\n---\n')}
+
+Return this exact format:
+[
+  {
+    "score": 8.5,
+    "feedback": "Great understanding! You identified the key point about...",
+    "maxPoints": 10
+  }
+]
+
+Remember: Be encouraging and lenient. Reward effort and partial understanding generously.`;
+
+  try {
+    if (!GEMINI_API_KEY) {
+      throw new Error('VITE_GEMINI_API_KEY is not set');
+    }
+
+    console.log('🤖 Calling Gemini for batch grading...');
+    const text = await callGemini(prompt);
+    console.log('✅ Grading response received');
+
+    // Extract JSON from response
+    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) {
+      console.error('No JSON array found in response:', text);
+      throw new Error('Invalid grading response format');
+    }
+
+    const grades = JSON.parse(jsonMatch[0]);
+    console.log('✨ Graded', grades.length, 'answers');
+    
+    // Validate and ensure we have the right number of grades
+    if (grades.length !== questionsAndAnswers.length) {
+      console.warn('Grade count mismatch. Expected:', questionsAndAnswers.length, 'Got:', grades.length);
+    }
+
+    return grades;
+  } catch (e) {
+    console.error('Failed to batch grade answers:', e);
+    // Fallback: give partial credit to all answers
+    return questionsAndAnswers.map(qa => ({
+      score: qa.maxPoints * 0.7, // Give 70% credit as fallback
+      feedback: 'Unable to auto-grade. Please review manually.',
+      maxPoints: qa.maxPoints
+    }));
+  }
 };

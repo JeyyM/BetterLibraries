@@ -1,10 +1,11 @@
 
 import React from 'react';
-import { UserRole, Book, QuizAttempt } from './types';
+import { UserRole, Book, QuizAttempt, Assignment } from './types';
 import Layout from './components/Layout';
 import Login from './components/Login';
 import StudentDashboard from './components/StudentDashboard';
 import TeacherDashboard from './components/TeacherDashboard';
+import TeacherLibrary from './components/TeacherLibrary';
 import StudentRoster from './components/StudentRoster';
 import AssignmentManager from './components/AssignmentManager';
 import BadgeManager from './components/BadgeManager';
@@ -16,14 +17,18 @@ import Achievements from './components/Achievements';
 import ReadingHistory from './components/ReadingHistory';
 import StudentAssignments from './components/StudentAssignments';
 import DiscussionBoard from './components/DiscussionBoard';
+import AddBook from './components/AddBook';
+import QuizStudio from './components/QuizStudio';
 import { TrendingUp, Users, Trophy, Activity, ClipboardList, History, Search, Medal, MessageSquare } from 'lucide-react';
 import { supabase } from './src/lib/supabase';
 
 const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = React.useState(false);
   const [role, setRole] = React.useState<UserRole>('student');
+  const [userEmail, setUserEmail] = React.useState<string>('');
   const [activeSection, setActiveSection] = React.useState('dashboard');
   const [selectedBook, setSelectedBook] = React.useState<Book | null>(null);
+  const [selectedAssignment, setSelectedAssignment] = React.useState<Assignment | null>(null);
   const [viewState, setViewState] = React.useState<'normal' | 'reading' | 'quiz' | 'results' | 'discussion'>('normal');
   const [lastAttempt, setLastAttempt] = React.useState<QuizAttempt | null>(null);
   const [books, setBooks] = React.useState<Book[]>([]);
@@ -50,8 +55,8 @@ const App: React.FC = () => {
             fullDescription: book.full_description || book.description || '',
             level: book.lexile_level,
             genre: book.genre || 'Fiction',
-            pages: book.page_count || 0,
-            estimatedTime: `${Math.ceil((book.page_count || 100) / 30)} min`,
+            pages: book.pages || 0,
+            estimatedTime: `${Math.ceil((book.pages || 100) / 30)} min`,
             content: book.description || ''
           }));
 
@@ -75,8 +80,9 @@ const App: React.FC = () => {
     return data.publicUrl || `https://placehold.co/300x400/6366f1/white?text=Book`;
   };
 
-  const handleLogin = (selectedRole: UserRole) => {
+  const handleLogin = (selectedRole: UserRole, email: string) => {
     setRole(selectedRole);
+    setUserEmail(email);
     setIsAuthenticated(true);
     setActiveSection('dashboard');
   };
@@ -85,11 +91,121 @@ const App: React.FC = () => {
     setIsAuthenticated(false);
     setViewState('normal');
     setSelectedBook(null);
+    setSelectedAssignment(null);
   };
 
-  const handleReadBook = (book: Book) => {
+  const handleReadBook = (book: Book, assignment?: Assignment) => {
     setSelectedBook(book);
+    setSelectedAssignment(assignment || null);
     setViewState('reading');
+  };
+
+  const handleTakeQuiz = (book: Book, assignment?: Assignment) => {
+    setSelectedBook(book);
+    setSelectedAssignment(assignment || null);
+    setViewState('quiz');
+  };
+
+  const handleViewResults = async (book: Book, assignment: Assignment) => {
+    try {
+      // Fetch the student's quiz attempt for this assignment
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      console.log('📊 Fetching results for assignment:', assignment.id, 'user:', user.id);
+
+      // Get the submission
+      const { data: submission, error: subError } = await supabase
+        .from('assignment_submissions')
+        .select('*')
+        .eq('assignment_id', assignment.id)
+        .eq('student_id', user.id)
+        .single();
+
+      console.log('📝 Submission data:', submission);
+      console.log('❌ Submission error:', subError);
+
+      if (subError || !submission) {
+        console.error('Error fetching submission:', subError);
+        alert('Could not load your submission results.');
+        return;
+      }
+
+      // Check if quiz_attempt_id exists
+      if (!submission.quiz_attempt_id) {
+        console.error('No quiz_attempt_id found in submission:', submission);
+        alert('This assignment has no quiz attempt recorded.');
+        return;
+      }
+
+      // Get the quiz attempt
+      const { data: attempt, error: attemptError } = await supabase
+        .from('quiz_attempts')
+        .select('*')
+        .eq('id', submission.quiz_attempt_id)
+        .single();
+
+      console.log('🎯 Attempt data:', attempt);
+      console.log('❌ Attempt error:', attemptError);
+
+      if (attemptError || !attempt) {
+        console.error('Error fetching attempt:', attemptError);
+        alert('Could not load your quiz results.');
+        return;
+      }
+
+      // Fetch the student's answers from quiz_answers table
+      const { data: answersData, error: answersError } = await supabase
+        .from('quiz_answers')
+        .select('*')
+        .eq('attempt_id', attempt.id)
+        .order('created_at', { ascending: true });
+
+      console.log('📝 Answers data:', answersData);
+      console.log('❌ Answers error:', answersError);
+
+      // Reconstruct student answers array
+      const studentAnswers = answersData?.map(ans => {
+        // For multiple choice, return the selected option index (including 0!)
+        if (ans.selected_option_index !== null && ans.selected_option_index !== undefined) {
+          return ans.selected_option_index;
+        }
+        // For text answers (short-answer/essay), return the answer text
+        if (ans.answer_text) {
+          return ans.answer_text;
+        }
+        return '';
+      }) || [];
+
+      console.log('✏️ Reconstructed student answers:', studentAnswers);
+
+      // Reconstruct the QuizAttempt object
+      const quizAttempt: QuizAttempt = {
+        id: attempt.id,
+        studentId: attempt.student_id,
+        quizId: attempt.quiz_id || 'assignment',
+        score: attempt.score || 0,
+        date: attempt.completed_at,
+        aiFeedback: attempt.ai_feedback || {
+          summary: '',
+          strengths: [],
+          weaknesses: [],
+          suggestions: []
+        },
+        questions: assignment.questions || [],
+        studentAnswers: studentAnswers
+      };
+
+      console.log('✅ Reconstructed quiz attempt:', quizAttempt);
+
+      setSelectedBook(book);
+      setSelectedAssignment(assignment);
+      setLastAttempt(quizAttempt);
+      setViewState('results');
+    } catch (error) {
+      console.error('Error viewing results:', error);
+      alert('Failed to load results. Please try again.');
+    }
   };
 
   const handleOpenDiscussion = (book: Book) => {
@@ -108,6 +224,7 @@ const App: React.FC = () => {
 
   const handleCloseFlow = () => {
     setSelectedBook(null);
+    setSelectedAssignment(null);
     setViewState('normal');
     setActiveSection('dashboard');
   };
@@ -119,13 +236,13 @@ const App: React.FC = () => {
   const renderContent = () => {
     // Priority full-screen views
     if (viewState === 'reading' && selectedBook) {
-      return <ReadingView book={selectedBook} onFinish={handleFinishReading} onBack={() => setViewState('normal')} />;
+      return <ReadingView book={selectedBook} userEmail={userEmail} onFinish={handleFinishReading} onBack={() => setViewState('normal')} />;
     }
     if (viewState === 'quiz' && selectedBook) {
-      return <QuizView book={selectedBook} onComplete={handleQuizComplete} onBack={() => setViewState('reading')} />;
+      return <QuizView book={selectedBook} assignment={selectedAssignment} userEmail={userEmail} onComplete={handleQuizComplete} onBack={() => setViewState('reading')} />;
     }
     if (viewState === 'results' && selectedBook && lastAttempt) {
-      return <ResultsView book={selectedBook} attempt={lastAttempt} onClose={handleCloseFlow} />;
+      return <ResultsView book={selectedBook} attempt={lastAttempt} assignment={selectedAssignment} onClose={handleCloseFlow} />;
     }
     if (viewState === 'discussion' && selectedBook) {
       return <DiscussionBoard book={selectedBook} role={role} onBack={() => setViewState('normal')} />;
@@ -135,10 +252,57 @@ const App: React.FC = () => {
     if (role === 'teacher') {
       switch (activeSection) {
         case 'dashboard': return <TeacherDashboard />;
+        case 'library-management':
+          return <TeacherLibrary 
+            onReadBook={handleReadBook}
+            onViewQuiz={(book) => {
+              setSelectedBook(book);
+              setActiveSection('quiz-view');
+            }}
+            onAddBook={() => setActiveSection('add-book')}
+          />;
         case 'roster':
           return <StudentRoster />;
         case 'teacher-assignments':
           return <AssignmentManager />;
+        case 'add-book':
+          return <AddBook 
+            onBack={() => setActiveSection('library-management')} 
+            onBookAdded={() => {
+              // Refresh books list
+              const fetchBooks = async () => {
+                const { data } = await supabase
+                  .from('books')
+                  .select('*')
+                  .eq('is_active', true)
+                  .order('title');
+                if (data) {
+                  const transformedBooks: Book[] = data.map(book => ({
+                    id: book.id,
+                    title: book.title,
+                    author: book.author,
+                    coverImage: getCoverImageUrl(book.id),
+                    description: book.description || '',
+                    fullDescription: book.full_description || book.description || '',
+                    level: book.lexile_level,
+                    genre: book.genre || 'Fiction',
+                    pages: book.pages || 0,
+                    estimatedTime: `${Math.ceil((book.pages || 100) / 30)} min`,
+                    content: book.description || ''
+                  }));
+                  setBooks(transformedBooks);
+                }
+              };
+              fetchBooks();
+            }} 
+          />;
+        case 'quiz-view':
+          return selectedBook ? (
+            <QuizStudio 
+              book={selectedBook}
+              onBack={() => setActiveSection('library-management')}
+            />
+          ) : null;
         case 'activity':
           return <BadgeManager />;
         case 'discussions':
@@ -245,7 +409,7 @@ const App: React.FC = () => {
       case 'history':
         return <ReadingHistory />;
       case 'assignments':
-        return <StudentAssignments onReadBook={handleReadBook} onNavigateToLibrary={() => setActiveSection('library')} />;
+        return <StudentAssignments onReadBook={handleReadBook} onTakeQuiz={handleTakeQuiz} onViewResults={handleViewResults} onNavigateToLibrary={() => setActiveSection('library')} />;
       default: return <StudentDashboard onReadBook={handleReadBook} onNavigateToBadges={() => setActiveSection('achievements')} />;
     }
   };

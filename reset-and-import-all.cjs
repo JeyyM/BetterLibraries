@@ -15,7 +15,7 @@ const booksData = [
     author: "Rudyard Kipling",
     lexile: "850-930L",
     genre: "Classic Fiction",
-    pages: 45,
+    pages: 14,
     coverImage: "Rikki-Tikki-Tavi.jpg",
     pdfFile: "Rikki-Tikki-Tavi.pdf",
     description: "A brave mongoose protects a family from cobras in colonial India."
@@ -35,7 +35,7 @@ const booksData = [
     author: "Antoine de Saint-Exupéry",
     lexile: "710L",
     genre: "Classic Fiction",
-    pages: 96,
+    pages: 64,
     coverImage: "The Little Prince.jpg",
     pdfFile: "The Little Prince.pdf",
     description: "A young prince travels from planet to planet seeking wisdom."
@@ -65,7 +65,7 @@ const booksData = [
     author: "Ernest Hemingway",
     lexile: "940L",
     genre: "Classic Fiction",
-    pages: 127,
+    pages: 52,
     coverImage: "The Old Man and the Sea.jfif",
     pdfFile: "The Old Man and the Sea.pdf",
     description: "An elderly fisherman battles a giant marlin in the Gulf Stream."
@@ -221,6 +221,8 @@ async function importEverything() {
       // Extract numeric part from lexile (e.g., "850-930L" -> 850, "710L" -> 710)
       const lexileNumeric = parseInt(bookData.lexile.split('-')[0].replace('L', ''));
       
+      console.log(`  📄 Using page count: ${bookData.pages}`);
+      
       const { data: insertedBook, error: insertError } = await supabase
         .from('books')
         .insert({
@@ -240,7 +242,7 @@ async function importEverything() {
       }
 
       const bookId = insertedBook.id;
-      console.log(`  ✅ Created book in DB (ID: ${bookId})`);
+      console.log(`  ✅ Created book in DB (ID: ${bookId}, Pages: ${insertedBook.pages})`);
 
       // 2. Upload cover image with book ID as filename
       const coverPath = path.join(coversDir, bookData.coverImage);

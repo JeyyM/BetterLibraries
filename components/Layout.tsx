@@ -47,6 +47,7 @@ const Layout: React.FC<LayoutProps> = ({ children, role, onLogout, activeSection
   const teacherNav = [
     { name: 'Class Overview', icon: LayoutDashboard, id: 'dashboard' },
     { name: 'Student Roster', icon: Users, id: 'roster' },
+    { name: 'Library Management', icon: Library, id: 'library-management' },
     { name: 'Discussion Hub', icon: MessageSquare, id: 'discussions' },
     { name: 'Assignment Lab', icon: ClipboardList, id: 'teacher-assignments' },
     { name: 'Reward Studio', icon: Sparkles, id: 'activity' },

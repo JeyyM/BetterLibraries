@@ -80,26 +80,41 @@ export interface Quiz {
 export interface Assignment {
   id: string;
   bookId: string;
+  classId?: string; // Class/section this assignment is for
   title: string;
   status: 'published' | 'closed' | 'archived' | 'in-progress' | 'not-started';
   deadline: string;
   createdAt: string;
   assignedStudentIds: string[];
   instructions?: string;
+  questions?: QuizQuestion[]; // Add questions to assignments
   submissions?: Submission[];
   hasDiscussion?: boolean;
   discussionMaxScore?: number;
+  enableAutoAIGrading?: boolean; // Auto-grade submissions with AI
+  totalPoints?: number; // Total points for the assignment
 }
 
 export interface Submission {
   id: string;
   studentId: string;
   studentName: string;
+  studentEmail?: string;
   submittedAt: string;
-  answers: { questionId: string; studentAnswer: string; score?: number; feedback?: string }[];
+  answers: { 
+    questionId: string; 
+    studentAnswer: string; 
+    studentSelectedIndex?: number | null;
+    score?: number; 
+    feedback?: string;
+    id?: string;
+  }[];
   totalScore?: number;
+  score?: number;
   isReviewed: boolean;
   isLate?: boolean;
+  teacherComments?: string;
+  gradingStatus?: 'ai-graded' | 'teacher-graded' | 'not-graded';
 }
 
 export interface QuizAttempt {
@@ -114,4 +129,17 @@ export interface QuizAttempt {
     weaknesses: string[];
     suggestions: string[];
   };
+  questions?: QuizQuestion[]; // The quiz questions
+  studentAnswers?: (number | string)[]; // Student's answers (index for MC, text for short/essay)
+}
+
+export interface ReadingProgress {
+  id: string;
+  user_email: string;
+  book_id: string;
+  current_page: number;
+  total_pages: number;
+  last_read_at: string;
+  created_at: string;
+  updated_at: string;
 }

@@ -56,15 +56,33 @@
     // Listen for hash changes (page navigation)
     window.addEventListener('hashchange', function() {
       const hash = window.location.hash;
+      console.log('📍 Hash changed:', hash);
       const pageMatch = hash.match(/page=(\d+)/);
       if (pageMatch && pdfDoc) {
         const newPage = parseInt(pageMatch[1]);
+        console.log('📄 Navigating to page:', newPage, '/', pdfDoc.numPages);
         if (newPage >= 1 && newPage <= pdfDoc.numPages) {
           currentPage = newPage;
           renderPage(currentPage);
         }
       }
     });
+    
+    // Also check hash on initial load
+    function checkInitialHash() {
+      const hash = window.location.hash;
+      if (hash) {
+        const pageMatch = hash.match(/page=(\d+)/);
+        if (pageMatch) {
+          const newPage = parseInt(pageMatch[1]);
+          if (newPage >= 1) {
+            currentPage = newPage;
+            console.log('📍 Initial page from hash:', currentPage);
+          }
+        }
+      }
+    }
+    checkInitialHash();
     
     // Listen for URL changes (for initial load with page parameter)
     const urlParams = new URLSearchParams(window.location.search);

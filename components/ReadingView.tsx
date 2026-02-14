@@ -6,15 +6,17 @@ import { supabase } from '../src/lib/supabase';
 
 interface ReadingViewProps {
   book: Book;
+  userEmail: string;
   onFinish: () => void;
   onBack: () => void;
 }
 
-const ReadingView: React.FC<ReadingViewProps> = ({ book, onFinish, onBack }) => {
+const ReadingView: React.FC<ReadingViewProps> = ({ book, userEmail, onFinish, onBack }) => {
   const [pdfUrl, setPdfUrl] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [currentPage, setCurrentPage] = React.useState<number>(1);
+  const [progressLoaded, setProgressLoaded] = React.useState(false);
   const containerRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
@@ -45,6 +47,37 @@ const ReadingView: React.FC<ReadingViewProps> = ({ book, onFinish, onBack }) => 
     loadPDF();
   }, [book.id]);
 
+  // Load reading progress from database
+  React.useEffect(() => {
+    const loadProgress = async () => {
+      if (!userEmail || !book.id) return;
+
+      try {
+        const { data, error } = await supabase
+          .from('reading_progress')
+          .select('current_page')
+          .eq('user_email', userEmail)
+          .eq('book_id', book.id)
+          .single();
+
+        if (error) {
+          if (error.code !== 'PGRST116') { // PGRST116 = no rows returned
+            console.error('Error loading progress:', error);
+          }
+        } else if (data) {
+          console.log('📖 Loaded progress: Page', data.current_page);
+          setCurrentPage(data.current_page);
+        }
+      } catch (err) {
+        console.error('Error loading progress:', err);
+      } finally {
+        setProgressLoaded(true);
+      }
+    };
+
+    loadProgress();
+  }, [userEmail, book.id]);
+
   // Use custom PDF viewer without toolbar (keep URL constant, only use hash for navigation)
   const pdfViewerUrl = pdfUrl 
     ? `/pdf-viewer.html?file=${encodeURIComponent(pdfUrl)}`
@@ -52,6 +85,40 @@ const ReadingView: React.FC<ReadingViewProps> = ({ book, onFinish, onBack }) => 
 
   const totalPages = book.pages || 100;
   const progressPercentage = (currentPage / totalPages) * 100;
+
+  // Save reading progress to database (debounced)
+  React.useEffect(() => {
+    if (!progressLoaded || !userEmail || !book.id || currentPage < 1) return;
+
+    const saveProgress = async () => {
+      try {
+        const { error } = await supabase
+          .from('reading_progress')
+          .upsert({
+            user_email: userEmail,
+            book_id: book.id,
+            current_page: currentPage,
+            total_pages: totalPages,
+            last_read_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }, {
+            onConflict: 'user_email,book_id'
+          });
+
+        if (error) {
+          console.error('Error saving progress:', error);
+        } else {
+          console.log('💾 Saved progress: Page', currentPage);
+        }
+      } catch (err) {
+        console.error('Error saving progress:', err);
+      }
+    };
+
+    // Debounce save by 1 second
+    const timeoutId = setTimeout(saveProgress, 1000);
+    return () => clearTimeout(timeoutId);
+  }, [currentPage, userEmail, book.id, progressLoaded, totalPages]);
 
   // Debug: Log book pages
   React.useEffect(() => {
@@ -65,6 +132,7 @@ const ReadingView: React.FC<ReadingViewProps> = ({ book, onFinish, onBack }) => 
       if (iframe && iframe.contentWindow) {
         setTimeout(() => {
           try {
+            console.log('🔄 Setting PDF page to:', currentPage);
             iframe.contentWindow.location.hash = `page=${currentPage}`;
           } catch (e) {
             console.log('Cannot update hash (cross-origin or not loaded yet)');
@@ -73,6 +141,30 @@ const ReadingView: React.FC<ReadingViewProps> = ({ book, onFinish, onBack }) => 
       }
     }
   }, [currentPage, pdfUrl]);
+
+  // Add keyboard navigation (arrow keys)
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Prevent default behavior for arrow keys when reading
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        
+        if (e.key === 'ArrowLeft') {
+          // Previous page
+          navigateToPage(currentPage - 1);
+        } else if (e.key === 'ArrowRight') {
+          // Next page
+          navigateToPage(currentPage + 1);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [currentPage, totalPages]); // Include dependencies so we have latest values
 
   const navigateToPage = (page: number) => {
     const boundedPage = Math.max(1, Math.min(totalPages, page));
