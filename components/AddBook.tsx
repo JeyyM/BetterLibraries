@@ -77,12 +77,12 @@ const AddBook: React.FC<AddBookProps> = ({ onBack, onBookAdded }) => {
       // Use AI to analyze and extract metadata
       const metadata = await extractBookMetadata(pdfText, title || undefined);
       
-      // Fill in the form fields (only if they're empty)
-      if (!title) setTitle(metadata.title);
-      if (!author) setAuthor(metadata.author);
-      if (!description) setDescription(metadata.description);
-      setGenre(metadata.genre);
-      setLexileLevel(metadata.lexileLevel.toString());
+      // Fill in the form fields (only if they're empty and metadata exists)
+      if (!title && metadata.title) setTitle(metadata.title);
+      if (!author && metadata.author) setAuthor(metadata.author);
+      if (!description && metadata.description) setDescription(metadata.description);
+      if (metadata.genre) setGenre(metadata.genre);
+      if (metadata.lexileLevel) setLexileLevel(metadata.lexileLevel.toString());
       
       console.log('✨ AI autofill complete:', metadata);
       console.log('📄 PDF has', pageCount, 'pages');
@@ -160,8 +160,11 @@ const AddBook: React.FC<AddBookProps> = ({ onBack, onBookAdded }) => {
 
       console.log('📤 Sending book to upload API...');
       
+      // TODO: Replace with your Render backend URL after deployment
+      const API_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+      
       // Send to server API (uses SERVICE_ROLE_KEY to bypass RLS)
-      const response = await fetch('http://localhost:3001/api/upload-book', {
+      const response = await fetch(`${API_URL}/api/upload-book`, {
         method: 'POST',
         body: formData
       });
