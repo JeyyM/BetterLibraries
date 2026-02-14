@@ -9,9 +9,16 @@ dotenv.config({ path: '.env.local' });
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 
-// CORS configuration - allow requests from Vite dev server
+// CORS configuration - allow requests from Vite dev server and production
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:5173'],
+  origin: [
+    'http://localhost:5173', 
+    'http://localhost:3000', 
+    'http://127.0.0.1:5173',
+    'https://better-libraries.vercel.app',
+    'https://betterlibraries.vercel.app',
+    /\.vercel\.app$/  // Allow all Vercel preview deployments
+  ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
